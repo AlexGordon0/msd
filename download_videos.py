@@ -2,7 +2,7 @@ import yt_dlp
 import json
 
 path = "data/test_subset_100.json"
-save_path = "data/videos"
+videos_path = "data/videos"
 
 
 def get_secs(mins_secs):
@@ -16,7 +16,7 @@ def save_video(video_id, video_data):
         start = get_secs(segment["start_time"])
         end = get_secs(segment["end_time"])
         ydl_opts = {
-            "outtmpl": f"{save_path}/{video_id}_{i}.%(ext)s",
+            "outtmpl": f"{videos_path}/{video_id}_{i}.%(ext)s",
             "merge_output_format": "mp4",
             "quiet": True,
             "download_ranges": yt_dlp.utils.download_range_func(None, [(start, end)]),
