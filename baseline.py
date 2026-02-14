@@ -50,10 +50,10 @@ def evaluate_diarisation():
             {
                 "filename": diarised_file.name,
                 "total_speech": round(current_der["total"], 2),
-                "der_percent": round(current_der["diarization error rate"] * 100, 2),
                 "confusion": round(current_der["confusion"], 2),
                 "miss": round(current_der["missed detection"], 2),
                 "false_alarm": round(current_der["false alarm"], 2),
+                "der_percent": round(current_der["diarization error rate"] * 100, 2),
             }
         )
 
