@@ -1,36 +1,28 @@
-import os
-import torch
 import pandas as pd
-from pathlib import Path
-from pyannote.audio import Pipeline
-from pyannote.audio.pipelines.utils.hook import ProgressHook
 from pyannote.metrics.diarization import DiarizationErrorRate
 from pyannote.database.util import load_rttm
-from dotenv import load_dotenv, find_dotenv
 
-audios_path = Path("data/audios")
-diarised_path = Path("data/baselines")
-ground_truth_path = Path("data/ground_truths")
-
-
-def diarise(audio_path):
-    output_file = (diarised_path / audio_path.name).with_suffix(".rttm")
-    if output_file.exists():
-        return
-
-    with ProgressHook() as hook:
-        output = pipeline(audio_path, hook=hook)
-
-    with open(output_file, "w") as rttm:
-        output.speaker_diarization.write_rttm(rttm)
+# Takes MM:SS string and returns value in seconds
+def convert_to_seconds(time_string):
+    minutes, seconds = time_string.split(":")
+    return 60 * int(minutes) + int(seconds)
 
 
-def evaluate_diarisation():
+# Takes data as an array of {start, duration, speaker} segments
+def save_to_rttm(data, video_id, output_path):
+    with open(output_path, "w") as f:
+        for seg in data:
+            # RTTM Standard: SPEAKER <file> <chan> <start> <duration> <NA> <NA> <label> <NA> <NA>
+            line = f"SPEAKER {video_id} 1 {data['start']:.3f} {seg['duration']:.3f} <NA> <NA> {seg['speaker']} <NA> <NA>\n"
+            f.write(line)
+
+
+# Compares two folders with corresponding rttm files and writes results to csv
+def evaluate_diarisation(ground_truth_path, comparison_path, output_file_path):
     metric = DiarizationErrorRate(collar=0.250)
     results = []
-    output_csv = Path("data/diarisation_results.csv")
 
-    diarised_files = diarised_path.glob("*.rttm")
+    diarised_files = comparison_path.glob("*.rttm")
     for diarised_file in diarised_files:
         ground_truth_file = ground_truth_path / diarised_file.name
         if not ground_truth_file.exists():
@@ -58,7 +50,7 @@ def evaluate_diarisation():
         )
 
     df = pd.DataFrame(results)
-    df.to_csv(output_csv, index=False)
+    df.to_csv(output_file_path, index=False)
 
     global_der = abs(metric) * 100
     print(f"\nDataset DER: {global_der:.2f}%")
@@ -68,25 +60,4 @@ def evaluate_diarisation():
     print(f"Confusion:    {(report['confusion'] / total_time) * 100:.2f}%")
     print(f"Missed:       {(report['missed detection'] / total_time) * 100:.2f}%")
     print(f"False Alarm:  {(report['false alarm'] / total_time) * 100:.2f}%")
-    print(f"\nDetailed report saved to: {output_csv}")
-
-
-if __name__ == "__main__":
-    load_dotenv(find_dotenv())
-    HUGGINGFACE_ACCESS_TOKEN = os.environ.get("HUGGINGFACE_ACCESS_TOKEN")
-
-    pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-community-1", token=HUGGINGFACE_ACCESS_TOKEN
-    )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
-    pipeline.to(device)
-
-    Path(diarised_path).mkdir(parents=True, exist_ok=True)
-    audios = audios_path.glob("*.wav")
-    for i, audio in enumerate(audios):
-        print(f"{i + 1}: Diarising {audio}")
-        diarise(audio)
-
-    evaluate_diarisation()
+    print(f"\nDetailed report saved to: {output_file_path}")
