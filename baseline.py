@@ -48,7 +48,7 @@ def evaluate_diarisation():
 
         results.append(
             {
-                "filename": diarised_file.name,
+                "filename": diarised_file.stem,
                 "total_speech": round(current_der["total"], 2),
                 "confusion": round(current_der["confusion"], 2),
                 "miss": round(current_der["missed detection"], 2),

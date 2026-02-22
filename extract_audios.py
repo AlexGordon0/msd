@@ -2,14 +2,16 @@ from os import listdir
 from pathlib import Path
 from moviepy.video.io.VideoFileClip import VideoFileClip
 
-videos_path = "data/videos"
-audios_path = "data/audios"
+videos_path = Path("data/videos")
+audios_path = Path("data/audios")
 
 
 def extract_audio(filename):
-    video_path = Path(videos_path) / filename
+    video_path = videos_path / filename
     audio_filename = Path(filename).with_suffix(".wav")
-    output_path = Path(audios_path) / audio_filename
+    output_path = audios_path / audio_filename
+    if output_path.exists():
+        return
 
     with VideoFileClip(str(video_path)) as video:
         video.audio.write_audiofile(

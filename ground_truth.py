@@ -1,17 +1,18 @@
 import time
 import json
+from rttm_utils import save_to_rttm
 from os import listdir
 from pathlib import Path
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv, find_dotenv
 
-audios_path = "data/videos"
-ground_truths_path = "data/ground_truths"
+audios_path = Path("data/videos")
+ground_truths_path = Path("data/ground_truths")
 
 
 def get_ground_truth(filename):
-    uploaded_file = client.files.upload(file=f"{audios_path}/{filename}")
+    uploaded_file = client.files.upload(file=(audios_path / filename))
 
     while uploaded_file.state.name == "PROCESSING":
         time.sleep(2)
@@ -42,18 +43,6 @@ def get_ground_truth(filename):
     client.files.delete(name=uploaded_file.name)
     return json.loads(response.text)
 
-def convert_to_seconds(time):
-    minutes, seconds = time.split(":")
-    return 60 * float(minutes) + float(seconds)
-
-def save_to_rttm(data, audio_path, output_path):
-    with open(output_path, "w") as f:
-        for seg in data:
-            # RTTM Standard: SPEAKER <file> <chan> <start> <duration> <NA> <NA> <label> <NA> <NA>
-            seconds = convert_to_seconds(seg["start"])
-            line = f"SPEAKER {audio_path.stem} 1 {seconds:.3f} {seg['duration']:.3f} <NA> <NA> {seg['speaker']} <NA> <NA>\n"
-            f.write(line)
-
 
 if __name__ == "__main__":
     load_dotenv(find_dotenv())
@@ -68,4 +57,4 @@ if __name__ == "__main__":
         print(f"{i}: Getting ground truth for {Path(audio).stem}")
         if not out_rttm.exists():
             response = get_ground_truth(audio)
-            save_to_rttm(response, Path(audio), out_rttm)
+            save_to_rttm(response, Path(audio).stem, out_rttm)

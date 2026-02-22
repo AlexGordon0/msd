@@ -1,7 +1,5 @@
 venv/
-data/videos
-data/audios
-data/ground_truths
-data/baselines
-data/*.csv
 .env
+
+data
+!data/test_subset.json

@@ -4,6 +4,7 @@ import numpy as np
 import time
 import threading
 from queue import Queue
+from pathlib import Path
 
 
 class FileVideoStream:
@@ -43,22 +44,6 @@ class FileVideoStream:
     def stop(self):
         self.stopped = True
         self.stream.release()
-
-
-def get_iou(bb1, bb2):
-    left = max(bb1[0], bb2[0])
-    right = min(bb1[0] + bb1[2], bb2[0] + bb2[2])
-    top = max(bb1[1], bb2[1])
-    bottom = min(bb1[1] + bb1[3], bb2[1] + bb2[3])
-
-    if right < left or bottom < top:
-        return 0.0
-
-    intersection_area = (right - left) * (bottom - top)
-    bb1_area = bb1[2] * bb1[3]
-    bb2_area = bb2[2] * bb2[3]
-
-    return intersection_area / float(bb1_area + bb2_area - intersection_area)
 
 
 LIP_INDICES = [
@@ -164,173 +149,245 @@ options = FaceLandmarkerOptions(
     num_faces=1,
 )
 
-known_faces = {}
-tracked_faces = {}
 
-face_id_counter = 0
-mouth_ratio_history = {}
+def get_iou(bb1, bb2):
+    left = max(bb1[0], bb2[0])
+    right = min(bb1[0] + bb1[2], bb2[0] + bb2[2])
+    top = max(bb1[1], bb2[1])
+    bottom = min(bb1[1] + bb1[3], bb2[1] + bb2[3])
 
-video_path = "data/videos/4A8orzGYQRI_2.mp4"
-fvs = FileVideoStream(video_path).start()
+    if right < left or bottom < top:
+        return 0.0
 
-frame_count = 0
-time_per_frame = 1000 / fvs.fps
+    intersection_area = (right - left) * (bottom - top)
+    bb1_area = bb1[2] * bb1[3]
+    bb2_area = bb2[2] * bb2[3]
 
-scale = 0.25
-width = int(fvs.width * scale)
-height = int(fvs.height * scale)
-detector.setInputSize((width, height))
+    return intersection_area / float(bb1_area + bb2_area - intersection_area)
 
-with FaceLandmarker.create_from_options(options) as landmarker:
-    start_time = int(time.time() * 1000)
-    while fvs.more():
-        frame = fvs.read()
 
-        frame_start_time = int(time.time() * 1000)
-        elapsed_time = int(frame_start_time - start_time)
-        if elapsed_time > time_per_frame * frame_count:
+def run_pipeline(video_path, output_path):
+    face_memory = {}  # {id: {"bbox": rect, "embedding": face_embedding, "speaking": bool}, ..., }
+    face_id_counter = 0
+    mouth_ratio_history = {}
+
+    segments = []
+
+    fvs = FileVideoStream(video_path).start()
+
+    frame_count = 0
+    time_per_frame = 1000 / fvs.fps
+
+    scale = 0.25
+    width = int(fvs.width * scale)
+    height = int(fvs.height * scale)
+    detector.setInputSize((width, height))
+
+    with FaceLandmarker.create_from_options(options) as landmarker:
+        start_time = int(time.time() * 1000)
+        while fvs.more():
+            frame = fvs.read()
+
+            frame_start_time = int(time.time() * 1000)
+            frame_timestamp = time_per_frame * frame_count
+
+            # Skip frames for real-time diarisation
+            # elapsed_time = int(frame_start_time - start_time)
+            # if elapsed_time > frame_timestamp:
+            # frame_count += 1
+            # continue
+
             frame_count += 1
-            continue
 
-        frame_count += 1
+            resized_frame = cv2.resize(frame, None, fx=scale, fy=scale)
+            _, faces = detector.detect(resized_frame)
 
-        resized_frame = cv2.resize(frame, None, fx=scale, fy=scale)
-        _, faces = detector.detect(resized_frame)
+            tracked_faces = {}
 
-        current_frame_identities = {}
+            if faces is not None:
+                for i, face in enumerate(faces):
+                    # YuNet returns [x, y, w, h, ...]
+                    rect = list(map(int, face[:4]))
 
-        if faces is not None:
-            for i, face in enumerate(faces):
-                # YuNet returns [x, y, w, h, ...]
-                rect = list(map(int, face[:4]))
-
-                identity = None
-                # Use tracking instead of face embedding if possible
-                iou_threshold = 0.5
-                for face_id, data in tracked_faces.items():
-                    if get_iou(rect, data) > iou_threshold:
-                        print(f"Tracked {face_id}")
-                        identity = face_id
-                        break
-
-                force_redo_face_id = frame_count % 30 == 0
-
-                # Get face embedding
-                if identity is None or force_redo_face_id:
-                    aligned_face = recogniser.alignCrop(resized_frame, face)
-                    feature = recogniser.feature(aligned_face)
-
-                    # Check if embedding is already stored in known_faces
-                    face_match_confidence_threshold = 0.363
-                    for face_id, saved_feature in known_faces.items():
-                        score = recogniser.match(
-                            feature, saved_feature, cv2.FACE_RECOGNIZER_SF_FR_COSINE
-                        )
-                        if score > face_match_confidence_threshold:
-                            print(f"Face matched {face_id}")
+                    identity = None
+                    # Use tracking instead of face embedding if possible
+                    iou_threshold = 0.5
+                    for face_id, data in face_memory.items():
+                        if get_iou(rect, data["bbox"]) > iou_threshold:
+                            # print(f"Tracked {face_id}")
                             identity = face_id
                             break
 
-                # If embedding not already saved, then add face to known_faces
-                if identity is None:
-                    identity = f"Person_{face_id_counter}"
-                    print(f"New face {face_id_counter}")
-                    face_id_counter += 1
-                    known_faces[identity] = feature
+                    force_redo_face_id = frame_count % 30 == 0
 
-                current_frame_identities[identity] = rect
+                    # Get face embedding
+                    if identity is None or force_redo_face_id:
+                        aligned_face = recogniser.alignCrop(resized_frame, face)
+                        feature = recogniser.feature(aligned_face)
 
-                x, y, w, h = rect
+                        # Check if embedding is already stored in known_faces
+                        face_match_confidence_threshold = 0.363
+                        for face_id, saved_feature in face_memory.items():
+                            score = recogniser.match(
+                                feature,
+                                saved_feature["embedding"],
+                                cv2.FACE_RECOGNIZER_SF_FR_COSINE,
+                            )
+                            if score > face_match_confidence_threshold:
+                                # print(f"Face matched {face_id}")
+                                identity = face_id
+                                break
 
-                # Add a small margin (20%) to the crop for better landmarking context
-                # margin_x, margin_y = int(w * 0.2), int(h * 0.2)
-                margin_x, margin_y = 0, 0  # Test with margin disabled
-                x1, y1 = max(0, x - margin_x), max(0, y - margin_y)
-                x2, y2 = min(width, x + w + margin_x), min(height, y + h + margin_y)
+                    # If embedding not already saved, then add face to known_faces
+                    if identity is None:
+                        identity = f"SPEAKER_{face_id_counter:02d}"
+                        print(f"New face {identity}")
+                        face_id_counter += 1
+                        face_memory[identity] = {
+                            "embedding": feature,
+                            "bbox": rect,
+                            "is_speaking": False,
+                            "start_time": 0.0,
+                        }
 
-                face_crop = resized_frame[y1:y2, x1:x2]
+                    tracked_faces[identity] = rect
 
-                # Rescale points back to full-sized frame
-                abs_x1 = int(x1 / scale)
-                abs_y1 = int(y1 / scale)
-                abs_x2 = int(x2 / scale)
-                abs_y2 = int(y2 / scale)
+                    x, y, w, h = rect
 
-                if face_crop.size == 0:
-                    continue
+                    # Add a small margin (20%) to the crop for better landmarking context
+                    # margin_x, margin_y = int(w * 0.2), int(h * 0.2)
+                    margin_x, margin_y = 0, 0  # Test with margin disabled
+                    x1, y1 = max(0, x - margin_x), max(0, y - margin_y)
+                    x2, y2 = min(width, x + w + margin_x), min(height, y + h + margin_y)
 
-                # cv2.imwrite(f"data/images/{timestamp_ms}_{i}.png", face_crop)
+                    face_crop = resized_frame[y1:y2, x1:x2]
 
-                face_crop_rgb = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=face_crop_rgb)
+                    # Rescale points back to full-sized frame
+                    abs_x1 = int(x1 / scale)
+                    abs_y1 = int(y1 / scale)
+                    abs_x2 = int(x2 / scale)
+                    abs_y2 = int(y2 / scale)
 
-                result = landmarker.detect(mp_image)
+                    if face_crop.size == 0:
+                        continue
 
-                # Place landmarks on face
-                if result.face_landmarks:
-                    landmarks = result.face_landmarks[0]
+                    # cv2.imwrite(f"data/images/{timestamp_ms}_{i}.png", face_crop)
 
-                    p_top = landmarks[13]
-                    p_bottom = landmarks[14]
-                    p_left = landmarks[61]
-                    p_right = landmarks[291]
+                    face_crop_rgb = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
+                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=face_crop_rgb)
 
-                    v_dist = np.sqrt((p_top.x - p_bottom.x) ** 2 + (p_top.y - p_bottom.y) ** 2)
-                    h_dist = np.sqrt((p_left.x - p_right.x) ** 2 + (p_left.y - p_right.y) ** 2)
-                    mar = v_dist / h_dist
+                    result = landmarker.detect(mp_image)
 
-                    # Track history to detect movement/variance
-                    if identity not in mouth_ratio_history:
-                        mouth_ratio_history[identity] = []
-                    mouth_ratio_history[identity].append(mar)
+                    # Place landmarks on face
+                    if result.face_landmarks:
+                        landmarks = result.face_landmarks[0]
 
-                    if len(mouth_ratio_history[identity]) > 20:
-                        mouth_ratio_history[identity].pop(0)
+                        p_top = landmarks[13]
+                        p_bottom = landmarks[14]
+                        p_left = landmarks[61]
+                        p_right = landmarks[291]
 
-                    # If MAR variance is high, they are likely speaking
-                    mouth_ratio_variance_threshold = 0.0010
-                    is_speaking = (
-                        np.var(mouth_ratio_history[identity]) > mouth_ratio_variance_threshold
+                        v_dist = np.sqrt((p_top.x - p_bottom.x) ** 2 + (p_top.y - p_bottom.y) ** 2)
+                        h_dist = np.sqrt((p_left.x - p_right.x) ** 2 + (p_left.y - p_right.y) ** 2)
+                        mar = v_dist / h_dist
+
+                        # Track history to detect movement/variance
+                        if identity not in mouth_ratio_history:
+                            mouth_ratio_history[identity] = []
+                        mouth_ratio_history[identity].append(mar)
+
+                        if len(mouth_ratio_history[identity]) > int(fvs.fps):
+                            mouth_ratio_history[identity].pop(0)
+
+                        # If MAR variance is high, they are likely speaking
+                        mouth_ratio_variance_threshold = 0.0015
+                        is_speaking = (
+                            np.var(mouth_ratio_history[identity]) > mouth_ratio_variance_threshold
+                        )
+
+                        if is_speaking and not face_memory[identity]["is_speaking"]:
+                            # The person has just started speaking
+                            face_memory[identity]["start_time"] = frame_timestamp
+                        if not is_speaking and face_memory[identity]["is_speaking"]:
+                            # Person has just finished speaking
+                            segment_start_time = face_memory[identity]["start_time"]
+                            duration = frame_timestamp - segment_start_time
+                            segments.append(
+                                {
+                                    "start": segment_start_time / 1000,
+                                    "duration": duration / 1000,
+                                    "speaker": identity,
+                                }
+                            )
+                        face_memory[identity]["is_speaking"] = is_speaking
+
+                        '''
+                        for index in LIP_INDICES:
+                            landmark = landmarks[index]
+
+                            frame_x = int((x1 + landmark.x * face_crop.shape[1]) / scale)
+                            frame_y = int((y1 + landmark.y * face_crop.shape[0]) / scale)
+
+                            landmark_colour = (255, 0, 0)
+
+                            frame = cv2.circle(
+                                frame,
+                                (
+                                    frame_x,
+                                    frame_y,
+                                ),
+                                1,
+                                landmark_colour,
+                                -1,
+                            )
+                        '''
+                    else:
+                        print("Landmarks unable to be placed on face!")
+
+                    border_colour = (0, 255, 0) if is_speaking else (0, 0, 255)
+                    frame = cv2.rectangle(
+                        frame, (abs_x1, abs_y1), (abs_x2, abs_y2), border_colour, 3
                     )
 
-                    for index in LIP_INDICES:
-                        landmark = landmarks[index]
+            for face_id, new_rect in tracked_faces.items():
+                if face_id in face_memory:
+                    face_memory[face_id]["bbox"] = new_rect
 
-                        frame_x = int((x1 + landmark.x * face_crop.shape[1]) / scale)
-                        frame_y = int((y1 + landmark.y * face_crop.shape[0]) / scale)
-
-                        landmark_colour = (255, 0, 0)
-
-                        frame = cv2.circle(
-                            frame,
-                            (
-                                frame_x,
-                                frame_y,
-                            ),
-                            1,
-                            landmark_colour,
-                            -1,
-                        )
+            '''
+            cv2.imshow("Lip reading", frame)
+            
+            processing_time = int(time.time() * 1000 - frame_start_time)
+            if processing_time < time_per_frame:
+                # Frames are being processed too quickly
+                if cv2.waitKey(int(time_per_frame - processing_time)) & 0xFF == ord("q"):
+                    break
                 else:
-                    print("Landmarks unable to be placed on face!")
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+            '''
 
-                border_colour = (0, 255, 0) if is_speaking else (0, 0, 255)
-                frame = cv2.rectangle(frame, (abs_x1, abs_y1), (abs_x2, abs_y2), border_colour, 3)
-
-        tracked_faces = current_frame_identities
-
-        cv2.imshow("Lip reading", frame)
-
-        processing_time = int(time.time() * 1000 - frame_start_time)
-        print(1000 / processing_time)
-        if processing_time < time_per_frame:
-            # Frames are being processed too quickly
-            if cv2.waitKey(int(time_per_frame - processing_time)) & 0xFF == ord("q"):
-                break
-        else:
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
-print(face_id_counter)
-fvs.stop()
-cv2.destroyAllWindows()
+    segments.sort(key=lambda x: x["start"])
+    with open(output_path, "w") as f:
+        for seg in segments:
+            # RTTM Standard: SPEAKER <file> <chan> <start> <duration> <NA> <NA> <label> <NA> <NA>
+            line = f"SPEAKER {video_path.stem} 1 {seg['start']:.3f} {seg['duration']:.3f} <NA> <NA> {seg['speaker']} <NA> <NA>\n"
+            f.write(line)
+
+    fvs.stop()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    videos_path = Path("data/videos")
+    diarised_path = Path("data/diarised_video")
+    diarised_path.mkdir(parents=True, exist_ok=True)
+
+    videos = Path("data/videos").glob("*.mp4")
+    for i, video in enumerate(videos):
+        output_path = diarised_path / (video.with_suffix(".rttm").name)
+        print(f"{i}: Running pipeline for {video.stem}")
+        run_pipeline(video, output_path)
+

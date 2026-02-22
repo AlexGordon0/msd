@@ -1,3 +1,4 @@
+from rttm_utils import convert_to_seconds
 import yt_dlp
 import json
 
@@ -5,16 +6,11 @@ path = "data/test_subset_100.json"
 videos_path = "data/videos"
 
 
-def get_secs(mins_secs):
-    mins, secs = mins_secs.split(":")
-    return int(mins) * 60 + int(secs)
-
-
 def save_video(video_id, video_data):
     url = video_data["video_url"]
     for i, segment in enumerate(video_data["segments"]):
-        start = get_secs(segment["start_time"])
-        end = get_secs(segment["end_time"])
+        start = convert_to_seconds(segment["start_time"])
+        end = convert_to_seconds(segment["end_time"])
         ydl_opts = {
             "outtmpl": f"{videos_path}/{video_id}_{i}.%(ext)s",
             "merge_output_format": "mp4",
