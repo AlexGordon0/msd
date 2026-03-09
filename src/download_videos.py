@@ -1,6 +1,8 @@
-from rttm_utils import convert_to_seconds
-import yt_dlp
 import json
+
+import yt_dlp
+
+from rttm_utils import convert_to_seconds
 
 path = "test_subset_100.json"
 videos_path = "data/videos"

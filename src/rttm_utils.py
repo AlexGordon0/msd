@@ -1,6 +1,7 @@
 import pandas as pd
-from pyannote.metrics.diarization import DiarizationErrorRate
 from pyannote.database.util import load_rttm
+from pyannote.metrics.diarization import DiarizationErrorRate
+
 
 # Takes MM:SS string and returns value in seconds
 def convert_to_seconds(time_string):
@@ -13,7 +14,7 @@ def save_to_rttm(data, video_id, output_path):
     with open(output_path, "w") as f:
         for seg in data:
             # RTTM Standard: SPEAKER <file> <chan> <start> <duration> <NA> <NA> <label> <NA> <NA>
-            line = f"SPEAKER {video_id} 1 {data['start']:.3f} {seg['duration']:.3f} <NA> <NA> {seg['speaker']} <NA> <NA>\n"
+            line = f"SPEAKER {video_id} 1 {seg['start']:.3f} {seg['duration']:.3f} <NA> <NA> {seg['speaker']} <NA> <NA>\n"
             f.write(line)
 
 
@@ -31,6 +32,9 @@ def evaluate_diarisation(ground_truth_path, comparison_path, output_file_path):
 
         ref_dict = load_rttm(ground_truth_file)
         hyp_dict = load_rttm(diarised_file)
+
+        if len(ref_dict) == 0 or len(hyp_dict) == 0:
+            continue
 
         ref = ref_dict[diarised_file.stem]
         hyp = hyp_dict[diarised_file.stem]

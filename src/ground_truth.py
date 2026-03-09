@@ -1,11 +1,13 @@
-import time
 import json
-from rttm_utils import save_to_rttm
+import time
 from os import listdir
 from pathlib import Path
+
+from dotenv import find_dotenv, load_dotenv
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv, find_dotenv
+
+from rttm_utils import save_to_rttm
 
 audios_path = Path("data/videos")
 ground_truths_path = Path("data/ground_truths")
