@@ -280,6 +280,7 @@ def draw_face_info(frame, landmarks, bbox, is_speaking, scale):
 def run_pipeline(video_path):
     face_memory = {}  # {id: {"bbox": [], "embedding": [], "is_speaking": False, start_time: 0.0}, ..., }
     mouth_ratio_history = {}  # Stores mouth ratio history for each speaker
+    missed_frame_count = {}
     segments = []
     face_id_counter = 0
 
@@ -288,12 +289,13 @@ def run_pipeline(video_path):
 
     fvs = FileVideoStream(video_path).start()
     fps = fvs.fps
-    time_per_frame = 1000 / fvs.fps
+    time_per_frame = 1000 / fps
 
     with FaceLandmarker.create_from_options(landmarker_options) as landmarker:
         frame_count = 0
         start_time = int(time.time() * 1000)
 
+        force_recalibration = True
         while fvs.more():
             frame = fvs.read()
 
@@ -307,7 +309,8 @@ def run_pipeline(video_path):
             #     frame_count += 1
             #     continue
 
-            if frame_count % detection_interval == 0:
+            if force_recalibration:
+                force_recalibration = False
                 # Heavy detection logic runs on key frames
                 faces = DeepFace.extract_faces(
                     img_path=resized_frame,
@@ -394,6 +397,7 @@ def run_pipeline(video_path):
 
                 expanded_box = [x1, y1, x2 - x1, y2 - y1]
                 if result.face_landmarks:
+                    missed_frame_count[identity] = 0
                     landmarks = result.face_landmarks[0]
                     new_rect = get_bounding_box(landmarks, expanded_box)
 
@@ -413,7 +417,15 @@ def run_pipeline(video_path):
                     # Update the bounding box for the next frame
                     data["bbox"] = new_rect
                 else:
+                    # Face cannot be found by mediapipe
                     print(f"Cannot place face landmarks on {identity}")
+                    missed_frames = missed_frame_count.setdefault(identity, 0)
+                    missed_frames += 1
+
+                    # Allow 10 frames before heavy recalibration is forced
+                    if missed_frames >= 10:
+                        force_recalibration = True
+                    
 
             cv2.imshow("Lip reading", frame)
             frame_count += 1
@@ -421,15 +433,18 @@ def run_pipeline(video_path):
                 break
 
             # processing_time = int(time.time() * 1000 - frame_start_time)
-            # if processing_time < time_per_frame:
+            # if processing_time < time_per_frame - 1:
             #     # Frames are being processed too quickly
+            #     print("QUICK")
+            #     print(time_per_frame - processing_time)
             #     if cv2.waitKey(int(time_per_frame - processing_time)) & 0xFF == ord(
             #         "q"
             #     ):
             #         break
-            #     else:
-            #         if cv2.waitKey(1) & 0xFF == ord("q"):
-            #             break
+            # elif cv2.waitKey(1) & 0xFF == ord("q"):
+            #     break
+            # else:
+            #     print(time_per_frame - processing_time)
 
     # Add entries for faces still speaking at end of video
     for identity, data in face_memory.items():
