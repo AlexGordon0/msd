@@ -141,8 +141,6 @@ FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
 FaceDetector = mp.tasks.vision.FaceDetector
 
-# detector_options =
-
 landmarker_options = FaceLandmarkerOptions(
     base_options=BaseOptions(
         model_asset_path=mp_landmarker_path,
@@ -285,10 +283,9 @@ def run_pipeline(video_path):
     face_id_counter = 0
 
     scale = 0.25
-    detection_interval = 30
 
     fvs = FileVideoStream(video_path).start()
-    fps = fvs.fps
+    fps = int(fvs.fps)
     time_per_frame = 1000 / fps
 
     with FaceLandmarker.create_from_options(landmarker_options) as landmarker:
@@ -311,6 +308,9 @@ def run_pipeline(video_path):
 
             if force_recalibration:
                 force_recalibration = False
+
+                missed_frame_count = {}
+
                 # Heavy detection logic runs on key frames
                 faces = DeepFace.extract_faces(
                     img_path=resized_frame,
@@ -366,6 +366,8 @@ def run_pipeline(video_path):
                     else:
                         face_memory[identity]["bbox"] = rect
 
+                    missed_frame_count[identity] = 0
+
             for identity, data in face_memory.items():
                 prev_rect = data["bbox"]
 
@@ -419,13 +421,12 @@ def run_pipeline(video_path):
                 else:
                     # Face cannot be found by mediapipe
                     print(f"Cannot place face landmarks on {identity}")
-                    missed_frames = missed_frame_count.setdefault(identity, 0)
-                    missed_frames += 1
+                    if identity in missed_frame_count:
+                        missed_frame_count[identity] += 1
 
-                    # Allow 10 frames before heavy recalibration is forced
-                    if missed_frames >= 10:
-                        force_recalibration = True
-                    
+                        # Allow 1 second of missed tracking before heavy recalibration is forced
+                        if missed_frame_count[identity] >= fps:
+                            force_recalibration = True
 
             cv2.imshow("Lip reading", frame)
             frame_count += 1
@@ -465,7 +466,7 @@ if __name__ == "__main__":
 
     videos = Path("data/videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/p78K12jx_o4_0.mp4")
+        video = Path("data/videos/4A8orzGYQRI_2.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         # if output_path.exists():
