@@ -194,14 +194,18 @@ def get_bounding_box(landmarks, bbox):
     return [x1, y1, x2 - x1, y2 - y1]
 
 
-def add_segment(face_memory, segments, identity, frame_timestamp):
+def add_segment(face_memory, segments, identity, frame_timestamp, confidence=1):
+    if confidence < 0 or confidence > 1:
+        print(f"Invalid confidence value: {confidence}")
+        return
     segment_start_time = face_memory[identity]["start_time"]
     duration = frame_timestamp - segment_start_time
     segments.append(
         {
-            "start": segment_start_time / 1000,
+            "start": round(segment_start_time / 1000, 3),
             "speaker": identity,
-            "duration": duration / 1000,
+            "duration": round(duration / 1000, 3),
+            "confidence": confidence,
         }
     )
 
@@ -276,7 +280,7 @@ def draw_face_info(frame, landmarks, bbox, is_speaking, scale):
 
 
 def run_pipeline(video_path):
-    face_memory = {}  # {id: {"bbox": [], "embedding": [], "is_speaking": False, start_time: 0.0}, ..., }
+    face_memory = {}  # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0}, ..., }
     mouth_ratio_history = {}  # Stores mouth ratio history for each speaker
     missed_frame_count = {}
     segments = []
@@ -309,6 +313,11 @@ def run_pipeline(video_path):
             if force_recalibration:
                 force_recalibration = False
 
+                for identity, data in missed_frame_count.items():
+                    if data != 0:
+                        # Face has been hidden from frame
+                        # Add segment with 0 confidence
+                        add_segment(face_memory, segments, identity, frame_timestamp, 0)
                 missed_frame_count = {}
 
                 # Heavy detection logic runs on key frames
@@ -399,6 +408,14 @@ def run_pipeline(video_path):
 
                 expanded_box = [x1, y1, x2 - x1, y2 - y1]
                 if result.face_landmarks:
+                    if (
+                        missed_frame_count[identity] != 0
+                        and face_memory[identity]["is_speaking"]
+                    ):
+                        # Face has been hidden from frame
+                        # Add segment with 0 confidence
+                        add_segment(face_memory, segments, identity, frame_timestamp, 0)
+                        face_memory[identity]["start_time"] = frame_timestamp
                     missed_frame_count[identity] = 0
                     landmarks = result.face_landmarks[0]
                     new_rect = get_bounding_box(landmarks, expanded_box)
@@ -423,6 +440,16 @@ def run_pipeline(video_path):
                     print(f"Cannot place face landmarks on {identity}")
                     if identity in missed_frame_count:
                         missed_frame_count[identity] += 1
+
+                        # If they are speaking and a frame is missed then start new segment with new confidence value
+                        if (
+                            face_memory[identity]["is_speaking"]
+                            and missed_frame_count[identity] == 1
+                        ):
+                            add_segment(
+                                face_memory, segments, identity, frame_timestamp
+                            )
+                            face_memory[identity]["start_time"] = frame_timestamp
 
                         # Allow 1 second of missed tracking before heavy recalibration is forced
                         if missed_frame_count[identity] >= fps:
