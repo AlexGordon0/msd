@@ -4,10 +4,13 @@ import sys
 import torch
 from dotenv import find_dotenv, load_dotenv
 from pyannote.audio import Pipeline
+from pathlib import Path
 
 from src.audio import diarise_from_array
 from src.cam import run_pipeline
 from src.extract_audios import extract_audio
+from src.fusion_engine import merge_diarisation
+from src.rttm_utils import save_to_rttm
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
@@ -31,5 +34,15 @@ if __name__ == "__main__":
 
     audio, sample_rate = extract_audio(filename)
     audio_segments = diarise_from_array(audio, sample_rate, pipeline)
+    video_segments = run_pipeline(filename)
+    print("-" * 80)
     print(audio_segments)
-    # video_segments = run_pipeline(filename)
+    print("-" * 80)
+    print(video_segments)
+    print("-" * 80)
+
+    merged_output = merge_diarisation(audio_segments, video_segments)
+    print(merged_output)
+    filename_path = Path(filename)
+    output_path = filename_path.name.with_suffix(".rttm")
+    save_to_rttm(merged_output, Path(filename).stem, output_path)

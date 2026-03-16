@@ -8,10 +8,12 @@ import mediapipe as mp
 import numpy as np
 from deepface import DeepFace
 
-from rttm_utils import evaluate_diarisation, save_to_rttm
+from src.rttm_utils import evaluate_diarisation, save_to_rttm
 
 
 class FileVideoStream:
+    """Video manager to perform asynchronous frame reading"""
+
     def __init__(self, path, queue_size=128):
         self.stream = cv2.VideoCapture(path)
         self.stopped = False
@@ -152,7 +154,7 @@ landmarker_options = FaceLandmarkerOptions(
 
 # Takes two bounding boxes of the format [x, y, width, height] and returns true if their IoU
 # surpasses the threshold value.
-def check_tracking(bb1, bb2, iou_threshold=0.5):
+def _check_tracking(bb1, bb2, iou_threshold=0.5):
     left = max(bb1[0], bb2[0])
     right = min(bb1[0] + bb1[2], bb2[0] + bb2[2])
     top = max(bb1[1], bb2[1])
@@ -173,7 +175,7 @@ def check_tracking(bb1, bb2, iou_threshold=0.5):
 
 
 # Returns if cosine distance of faces is larger than threshold value
-def check_face_embedding(face1, face2, threshold=0.363):
+def _check_face_embedding(face1, face2, threshold=0.363):
     score = np.dot(face1, face2) / (np.linalg.norm(face1) * np.linalg.norm(face2))
     if score > threshold:
         return True
@@ -181,7 +183,7 @@ def check_face_embedding(face1, face2, threshold=0.363):
     return False
 
 
-def get_bounding_box(landmarks, bbox):
+def _get_bounding_box(landmarks, bbox):
     xs = [l.x for l in landmarks]
     ys = [l.y for l in landmarks]
 
@@ -194,23 +196,22 @@ def get_bounding_box(landmarks, bbox):
     return [x1, y1, x2 - x1, y2 - y1]
 
 
-def add_segment(face_memory, segments, identity, frame_timestamp, confidence=1):
+def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=1):
     if confidence < 0 or confidence > 1:
         print(f"Invalid confidence value: {confidence}")
         return
     segment_start_time = face_memory[identity]["start_time"]
-    duration = frame_timestamp - segment_start_time
     segments.append(
         {
             "start": round(segment_start_time / 1000, 3),
+            "end": round(frame_timestamp / 1000, 3),
             "speaker": identity,
-            "duration": round(duration / 1000, 3),
             "confidence": confidence,
         }
     )
 
 
-def update_speech_status(
+def _update_speech_status(
     landmarks, identity, history_dict, face_mem, segments, timestamp, fps
 ):
     p_top, p_bottom = landmarks[13], landmarks[14]
@@ -235,26 +236,26 @@ def update_speech_status(
         face_mem[identity]["start_time"] = timestamp
     elif not is_speaking and was_speaking:
         # Person has just finished speaking
-        add_segment(face_mem, segments, identity, timestamp)
+        _add_segment(face_mem, segments, identity, timestamp)
 
     face_mem[identity]["is_speaking"] = is_speaking
     return is_speaking
 
 
-def draw_face_info(frame, landmarks, bbox, is_speaking, scale):
+def _draw_face_info(frame, landmarks, bbox, is_speaking, SCALE):
     x, y, w, h = bbox
 
     # Rescale points back to full-sized frame
-    abs_x1 = int(x / scale)
-    abs_y1 = int(y / scale)
-    abs_x2 = int((x + w) / scale)
-    abs_y2 = int((y + h) / scale)
+    abs_x1 = int(x / SCALE)
+    abs_y1 = int(y / SCALE)
+    abs_x2 = int((x + w) / SCALE)
+    abs_y2 = int((y + h) / SCALE)
 
     for index in LIP_INDICES:
         landmark = landmarks[index]
 
-        frame_x = int(abs_x1 + landmark.x * w / scale)
-        frame_y = int(abs_y1 + landmark.y * h / scale)
+        frame_x = int(abs_x1 + landmark.x * w / SCALE)
+        frame_y = int(abs_y1 + landmark.y * h / SCALE)
 
         landmark_colour = (255, 0, 0)
 
@@ -279,14 +280,14 @@ def draw_face_info(frame, landmarks, bbox, is_speaking, scale):
         )
 
 
-def run_pipeline(video_path):
+def run_pipeline(video_path, display_output=False):
     face_memory = {}  # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0}, ..., }
     mouth_ratio_history = {}  # Stores mouth ratio history for each speaker
     missed_frame_count = {}
     segments = []
     face_id_counter = 0
 
-    scale = 0.25
+    SCALE = 0.25
 
     fvs = FileVideoStream(video_path).start()
     fps = int(fvs.fps)
@@ -302,7 +303,7 @@ def run_pipeline(video_path):
 
             frame_start_time = int(time.time() * 1000)
             frame_timestamp = time_per_frame * frame_count
-            resized_frame = cv2.resize(frame, None, fx=scale, fy=scale)
+            resized_frame = cv2.resize(frame, None, fx=SCALE, fy=SCALE)
 
             # Skip frames for real-time diarisation
             # elapsed_time = int(frame_start_time - start_time)
@@ -317,7 +318,9 @@ def run_pipeline(video_path):
                     if data != 0:
                         # Face has been hidden from frame
                         # Add segment with 0 confidence
-                        add_segment(face_memory, segments, identity, frame_timestamp, 0)
+                        _add_segment(
+                            face_memory, segments, identity, frame_timestamp, 0
+                        )
                 missed_frame_count = {}
 
                 # Heavy detection logic runs on key frames
@@ -341,7 +344,7 @@ def run_pipeline(video_path):
 
                     # Use tracking instead of face embedding if possible
                     for id, data in face_memory.items():
-                        if check_tracking(data["bbox"], rect):
+                        if _check_tracking(data["bbox"], rect):
                             identity = id
                             break
 
@@ -357,7 +360,7 @@ def run_pipeline(video_path):
                         feature = np.array(embedding_objs[0]["embedding"])
 
                         for id, data in face_memory.items():
-                            if check_face_embedding(data["embedding"], feature):
+                            if _check_face_embedding(data["embedding"], feature):
                                 identity = id
                                 break
 
@@ -388,11 +391,11 @@ def run_pipeline(video_path):
                 x1 = max(0, int(prev_rect[0] - x_margin))
                 y1 = max(0, int(prev_rect[1] - y_margin))
                 x2 = min(
-                    int(fvs.width * scale),
+                    int(fvs.width * SCALE),
                     int(prev_rect[0] + prev_rect[2] + x_margin),
                 )
                 y2 = min(
-                    int(fvs.height * scale),
+                    int(fvs.height * SCALE),
                     int(prev_rect[1] + prev_rect[3] + y_margin),
                 )
 
@@ -409,19 +412,21 @@ def run_pipeline(video_path):
                 expanded_box = [x1, y1, x2 - x1, y2 - y1]
                 if result.face_landmarks:
                     if (
-                        missed_frame_count[identity] != 0
+                        missed_frame_count.get(identity, 0) != 0
                         and face_memory[identity]["is_speaking"]
                     ):
                         # Face has been hidden from frame
                         # Add segment with 0 confidence
-                        add_segment(face_memory, segments, identity, frame_timestamp, 0)
+                        _add_segment(
+                            face_memory, segments, identity, frame_timestamp, 0
+                        )
                         face_memory[identity]["start_time"] = frame_timestamp
                     missed_frame_count[identity] = 0
                     landmarks = result.face_landmarks[0]
-                    new_rect = get_bounding_box(landmarks, expanded_box)
+                    new_rect = _get_bounding_box(landmarks, expanded_box)
 
                     # Calculate MAR and Update segments
-                    is_speaking = update_speech_status(
+                    is_speaking = _update_speech_status(
                         landmarks,
                         identity,
                         mouth_ratio_history,
@@ -431,14 +436,17 @@ def run_pipeline(video_path):
                         fps,
                     )
 
-                    draw_face_info(frame, landmarks, expanded_box, is_speaking, scale)
+                    if display_output:
+                        _draw_face_info(
+                            frame, landmarks, expanded_box, is_speaking, SCALE
+                        )
 
                     # Update the bounding box for the next frame
                     data["bbox"] = new_rect
                 else:
                     # Face cannot be found by mediapipe
-                    print(f"Cannot place face landmarks on {identity}")
                     if identity in missed_frame_count:
+                        print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value
@@ -446,7 +454,7 @@ def run_pipeline(video_path):
                             face_memory[identity]["is_speaking"]
                             and missed_frame_count[identity] == 1
                         ):
-                            add_segment(
+                            _add_segment(
                                 face_memory, segments, identity, frame_timestamp
                             )
                             face_memory[identity]["start_time"] = frame_timestamp
@@ -455,7 +463,8 @@ def run_pipeline(video_path):
                         if missed_frame_count[identity] >= fps:
                             force_recalibration = True
 
-            cv2.imshow("Lip reading", frame)
+            if display_output:
+                cv2.imshow("Lip reading", frame)
             frame_count += 1
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
@@ -477,7 +486,7 @@ def run_pipeline(video_path):
     # Add entries for faces still speaking at end of video
     for identity, data in face_memory.items():
         if data["is_speaking"]:
-            add_segment(face_memory, segments, identity, frame_timestamp)
+            _add_segment(face_memory, segments, identity, frame_timestamp)
 
     fvs.stop()
     cv2.destroyAllWindows()
@@ -493,12 +502,12 @@ if __name__ == "__main__":
 
     videos = Path("data/videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/4A8orzGYQRI_2.mp4")
+        video = Path("data/videos/GSfP1mX7R-g_0.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         # if output_path.exists():
         # continue
-        segments = run_pipeline(video)
+        segments = run_pipeline(video, True)
         print(segments)
         save_to_rttm(segments, video.stem, output_path)
         break
