@@ -9,7 +9,7 @@ from src.audio import diarise_from_array
 from src.cam import run_pipeline
 from src.extract_audios import extract_audio
 from src.fusion_engine import merge_diarisation
-from src.rttm_utils import save_to_rttm
+from src.rttm_utils import save_to_rttm, evaluate_diarisation
 
 if __name__ == "__main__":
     load_dotenv(find_dotenv())
@@ -26,6 +26,7 @@ if __name__ == "__main__":
     videos_path = Path("data/videos")
     output_folder = Path("data/combined_diarisation")
     output_folder.mkdir(parents=True, exist_ok=True)
+    ground_truth_folder = Path("data/ground_truths")
 
     for filename in videos_path.glob("*.mp4"):
         audio, sample_rate = extract_audio(filename)
@@ -41,3 +42,5 @@ if __name__ == "__main__":
         # print(merged_output)
         output_path = output_folder / filename.name.with_suffix(".rttm")
         save_to_rttm(merged_output, filename.stem, output_path)
+
+    evaluate_diarisation(ground_truth_folder, output_folder, "data/combined_results.csv")

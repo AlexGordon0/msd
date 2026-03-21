@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -123,14 +122,6 @@ def _solve_identity_mapping(
     """
     Build a co-occurrence overlap matrix between audio and video speaker IDs,
     then solve the assignment problem to find the best 1-to-1 mapping.
-
-    Returns
-    ───────
-    audio_to_canonical : dict[audio_speaker_id -> canonical_id]
-    video_to_canonical : dict[video_speaker_id -> canonical_id]
-
-    Unmatched speakers (where one channel has more speakers than the other)
-    receive their own unique canonical IDs.
     """
     # Collect unique speaker IDs from each channel
     audio_speakers = sorted({iv.audio_speaker for iv in intervals if iv.audio_speaker})
@@ -194,6 +185,10 @@ def _solve_identity_mapping(
             video_to_canonical[spk] = f"{CANONICAL_PREFIX}{canonical_counter:02d}"
             canonical_counter += 1
 
+    print(audio_to_canonical)
+    print(video_to_canonical)
+    print("-" * 80)
+
     return audio_to_canonical, video_to_canonical
 
 
@@ -205,12 +200,9 @@ def _resolve_intervals(
     """
     Mutates each interval in-place, setting resolved_speaker.
 
-    Decision logic
-    ──────────────
     Both channels present:
         Use video if confidence >= VIDEO_CONFIDENCE_THRESHOLD,
         otherwise use audio.
-        (Extend to a weighted vote if you have calibrated error rates.)
     Only one channel present:
         Use that channel directly.
     """

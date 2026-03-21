@@ -44,5 +44,5 @@ if __name__ == "__main__":
     merged_output = merge_diarisation(audio_segments, video_segments)
     print(merged_output)
     filename_path = Path(filename)
-    output_path = filename_path.name.with_suffix(".rttm")
+    output_path = filename_path.with_suffix(".rttm").name
     save_to_rttm(merged_output, Path(filename).stem, output_path)

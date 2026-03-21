@@ -12,7 +12,9 @@ from src.rttm_utils import evaluate_diarisation, save_to_rttm
 
 
 class FileVideoStream:
-    """Video manager to perform asynchronous frame reading"""
+    """
+    Video manager to perform asynchronous frame reading
+    """
 
     def __init__(self, path, queue_size=128):
         self.stream = cv2.VideoCapture(path)
@@ -152,9 +154,11 @@ landmarker_options = FaceLandmarkerOptions(
 )
 
 
-# Takes two bounding boxes of the format [x, y, width, height] and returns true if their IoU
-# surpasses the threshold value.
 def _check_tracking(bb1, bb2, iou_threshold=0.5):
+    """
+    Takes two bounding boxes of the format [x, y, width, height] and returns
+    true if their IoU surpasses the threshold value.
+    """
     left = max(bb1[0], bb2[0])
     right = min(bb1[0] + bb1[2], bb2[0] + bb2[2])
     top = max(bb1[1], bb2[1])
@@ -168,22 +172,21 @@ def _check_tracking(bb1, bb2, iou_threshold=0.5):
     bb2_area = bb2[2] * bb2[3]
 
     score = intersection_area / float(bb1_area + bb2_area - intersection_area)
-    if score > iou_threshold:
-        return True
-
-    return False
+    return score > iou_threshold
 
 
-# Returns if cosine distance of faces is larger than threshold value
 def _check_face_embedding(face1, face2, threshold=0.363):
+    """
+    Returns True if cosine distance of faces is larger than threshold value, else returns False
+    """
     score = np.dot(face1, face2) / (np.linalg.norm(face1) * np.linalg.norm(face2))
-    if score > threshold:
-        return True
-
-    return False
+    return score > threshold
 
 
 def _get_bounding_box(landmarks, bbox):
+    """
+    Calculate new bounding box for face based off of the most extreme landmark positions
+    """
     xs = [l.x for l in landmarks]
     ys = [l.y for l in landmarks]
 
@@ -197,6 +200,9 @@ def _get_bounding_box(landmarks, bbox):
 
 
 def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=1):
+    """
+    Add new segment to given segments array
+    """
     if confidence < 0 or confidence > 1:
         print(f"Invalid confidence value: {confidence}")
         return
@@ -214,6 +220,9 @@ def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=1)
 def _update_speech_status(
     landmarks, identity, history_dict, face_mem, segments, timestamp, fps
 ):
+    """
+    Update the speaking status of the speaker based off of mouth ratio variance
+    """
     p_top, p_bottom = landmarks[13], landmarks[14]
     p_left, p_right = landmarks[61], landmarks[291]
 
@@ -243,6 +252,10 @@ def _update_speech_status(
 
 
 def _draw_face_info(frame, landmarks, bbox, is_speaking, SCALE):
+    """
+    Draw list of landmarks and bounding box onto the given frame
+    If is_speaking is True, then bounding box is green, otherwise red
+    """
     x, y, w, h = bbox
 
     # Rescale points back to full-sized frame
@@ -304,12 +317,6 @@ def run_pipeline(video_path, display_output=False):
             frame_start_time = int(time.time() * 1000)
             frame_timestamp = time_per_frame * frame_count
             resized_frame = cv2.resize(frame, None, fx=SCALE, fy=SCALE)
-
-            # Skip frames for real-time diarisation
-            # elapsed_time = int(frame_start_time - start_time)
-            # if elapsed_time > frame_timestamp:
-            #     frame_count += 1
-            #     continue
 
             if force_recalibration:
                 force_recalibration = False
@@ -469,20 +476,6 @@ def run_pipeline(video_path, display_output=False):
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
-            # processing_time = int(time.time() * 1000 - frame_start_time)
-            # if processing_time < time_per_frame - 1:
-            #     # Frames are being processed too quickly
-            #     print("QUICK")
-            #     print(time_per_frame - processing_time)
-            #     if cv2.waitKey(int(time_per_frame - processing_time)) & 0xFF == ord(
-            #         "q"
-            #     ):
-            #         break
-            # elif cv2.waitKey(1) & 0xFF == ord("q"):
-            #     break
-            # else:
-            #     print(time_per_frame - processing_time)
-
     # Add entries for faces still speaking at end of video
     for identity, data in face_memory.items():
         if data["is_speaking"]:
@@ -505,8 +498,6 @@ if __name__ == "__main__":
         video = Path("data/videos/GSfP1mX7R-g_0.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
-        # if output_path.exists():
-        # continue
         segments = run_pipeline(video, True)
         print(segments)
         save_to_rttm(segments, video.stem, output_path)
