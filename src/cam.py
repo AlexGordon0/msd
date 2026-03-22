@@ -483,6 +483,9 @@ def run_pipeline(video_path, display_output=False):
 
     fvs.stop()
     cv2.destroyAllWindows()
+    segments = [
+        s for s in segments if s["confidence"] > 0
+    ]  # Remove 0 confidence segments
     return sorted(segments, key=lambda x: x["start"])
 
 
@@ -495,7 +498,7 @@ if __name__ == "__main__":
 
     videos = Path("data/videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/GSfP1mX7R-g_0.mp4")
+        video = Path("data/videos/4A8orzGYQRI_2.mp4.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, True)
