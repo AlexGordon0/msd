@@ -236,12 +236,12 @@ def _update_speech_status(
 
     history = history_dict.setdefault(identity, [])
     history.append(mar)
-    if len(history) > int(fps):
+    if len(history) > 15:
         history.pop(0)
 
     # If MAR variance is high, they are likely speaking
-    mouth_ratio_variance_threshold = 0.0001
-    # print(f"{identity}: {np.var(history)}")
+    mouth_ratio_variance_threshold = 0.00015
+    print(f"{identity}: {len(history)} , {np.var(history)}")
     is_speaking = np.var(history) > mouth_ratio_variance_threshold
 
     was_speaking = face_mem[identity]["is_speaking"]
@@ -478,11 +478,11 @@ def run_pipeline(video_path, display_output=False):
             if display_output:
                 cv2.imshow("Lip reading", frame)
             frame_count += 1
-            key = cv2.waitKey(1)
+            key = cv2.waitKey(0)
             if key & 0xFF == ord("q"):
                 break
-            # elif key & 0xFF == ord("n"):
-            #     continue
+            elif key & 0xFF == ord("n"):
+                continue
 
     # Add entries for faces still speaking at end of video
     for identity, data in face_memory.items():
@@ -506,7 +506,7 @@ if __name__ == "__main__":
 
     videos = Path("data/videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/c9f96W4TOXQ_4.mp4")
+        video = Path("data/videos/uygFuBUIkPI_0.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, True)
