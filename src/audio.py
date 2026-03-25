@@ -2,11 +2,12 @@ import os
 from pathlib import Path
 
 import torch
+from scipy.io import wavfile
 from dotenv import find_dotenv, load_dotenv
 from pyannote.audio import Pipeline
 from pyannote.audio.pipelines.utils.hook import ProgressHook
 
-from src.rttm_utils import evaluate_diarisation
+from src.rttm_utils import evaluate_diarisation, save_to_rttm
 
 audios_path = Path("data/audios")
 diarised_path = Path("data/baselines")
@@ -33,12 +34,10 @@ def diarise_to_file(audio_path, pipeline):
     if output_file.exists():
         return
 
-    with ProgressHook() as hook:
-        output = pipeline(audio_path, hook=hook)
+    sample_rate, audio_array = wavfile.read(audio_path)
+    segments = diarise_from_array(audio_array, sample_rate, pipeline)
 
-    with open(output_file, "w") as rttm:
-        output.speaker_diarization.write_rttm(rttm)
-
+    save_to_rttm(segments, output_file.stem, output_file) 
 
 if __name__ == "__main__":
     load_dotenv(find_dotenv())
@@ -56,6 +55,6 @@ if __name__ == "__main__":
     audios = audios_path.glob("*.wav")
     for i, audio in enumerate(audios):
         print(f"{i + 1}: Diarising {audio}")
-        diarise_to_file(audio)
+        diarise_to_file(audio, pipeline)
 
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)

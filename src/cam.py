@@ -225,10 +225,14 @@ def _update_speech_status(
     """
     p_top, p_bottom = landmarks[13], landmarks[14]
     p_left, p_right = landmarks[61], landmarks[291]
+    left_eye, right_eye = landmarks[473], landmarks[468]
 
     v_dist = np.linalg.norm((p_top.x - p_bottom.x, p_top.y - p_bottom.y))
     h_dist = np.linalg.norm((p_left.x - p_right.x, p_left.y - p_right.y))
-    mar = v_dist / h_dist
+    eye_dist = np.linalg.norm((left_eye.x - right_eye.x, left_eye.y - right_eye.y))
+    # Normalise horizontal distance to account for acute angle of face
+    normalised_h_dist = h_dist / eye_dist
+    mar = v_dist / normalised_h_dist
 
     history = history_dict.setdefault(identity, [])
     history.append(mar)
@@ -236,7 +240,8 @@ def _update_speech_status(
         history.pop(0)
 
     # If MAR variance is high, they are likely speaking
-    mouth_ratio_variance_threshold = 0.0015
+    mouth_ratio_variance_threshold = 0.0001
+    # print(f"{identity}: {np.var(history)}")
     is_speaking = np.var(history) > mouth_ratio_variance_threshold
 
     was_speaking = face_mem[identity]["is_speaking"]
@@ -473,8 +478,11 @@ def run_pipeline(video_path, display_output=False):
             if display_output:
                 cv2.imshow("Lip reading", frame)
             frame_count += 1
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1)
+            if key & 0xFF == ord("q"):
                 break
+            # elif key & 0xFF == ord("n"):
+            #     continue
 
     # Add entries for faces still speaking at end of video
     for identity, data in face_memory.items():
@@ -498,7 +506,7 @@ if __name__ == "__main__":
 
     videos = Path("data/videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/4A8orzGYQRI_2.mp4.mp4")
+        video = Path("data/videos/c9f96W4TOXQ_4.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, True)

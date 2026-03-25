@@ -14,7 +14,7 @@ def save_to_rttm(data, video_id, output_path):
     with open(output_path, "w") as f:
         for seg in data:
             # RTTM Standard: SPEAKER <file> <chan> <start> <duration> <NA> <NA> <label> <NA> <NA>
-            line = f"SPEAKER {video_id} 1 {seg['start']:.3f} {seg['duration']:.3f} <NA> <NA> {seg['speaker']} <NA> <NA>\n"
+            line = f"SPEAKER {video_id} 1 {seg['start']:.3f} {(seg['end'] - seg['start']):.3f} <NA> <NA> {seg['speaker']} <NA> <NA>\n"
             f.write(line)
 
 
