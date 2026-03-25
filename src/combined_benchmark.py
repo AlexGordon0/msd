@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
         merged_output = merge_diarisation(audio_segments, video_segments)
         # print(merged_output)
-        output_path = output_folder / filename.name.with_suffix(".rttm")
+        output_path = output_folder / (filename.with_suffix(".rttm").name)
         save_to_rttm(merged_output, filename.stem, output_path)
 
     evaluate_diarisation(ground_truth_folder, output_folder, "data/combined_results.csv")
