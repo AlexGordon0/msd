@@ -4,8 +4,6 @@ from pathlib import Path
 from queue import Queue
 
 import cv2
-import torch
-import torch.nn as nn
 import mediapipe as mp
 import numpy as np
 from deepface import DeepFace
@@ -154,34 +152,6 @@ landmarker_options = FaceLandmarkerOptions(
     running_mode=VisionRunningMode.IMAGE,
     num_faces=1,
 )
-
-
-class SpeechDetectorNN(nn.Module):
-    """
-    Bi-directional GRU trained on labelled landmark sequences.
-    """
-
-    def __init__(self, feat_dim=160, hidden=64, num_layers=2, dropout=0.3):
-        super.__init__()
-        self.gru = nn.GRU(
-            input_size=feat_dim,
-            hidden_size=hidden,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=True,
-            dropout=dropout,
-        )
-        self.head = nn.Sequential(
-            nn.Linear(hidden * 2, 32),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(32, 1),
-            nn.Sigmoid(),
-        )
-    
-    def forward(self, x):
-        out, _ = self.gru(x)
-        return self.head(out)
 
 
 def _check_tracking(bb1, bb2, iou_threshold=0.5):
@@ -345,7 +315,7 @@ def run_pipeline(video_path, display_output=False):
             frame = fvs.read()
 
             frame_start_time = int(time.time() * 1000)
-            frame_timestamp = time_per_frame * frame_count
+            frame_timestamp = int(time_per_frame * frame_count)
             resized_frame = cv2.resize(frame, None, fx=SCALE, fy=SCALE)
 
             if force_recalibration:
