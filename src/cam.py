@@ -241,7 +241,7 @@ def _update_speech_status(
 
     # If MAR variance is high, they are likely speaking
     mouth_ratio_variance_threshold = 0.00015
-    print(f"{identity}: {len(history)} , {np.var(history)}")
+    # print(f"{identity}: {len(history)} , {np.var(history)}")
     is_speaking = np.var(history) > mouth_ratio_variance_threshold
 
     was_speaking = face_mem[identity]["is_speaking"]
@@ -458,7 +458,7 @@ def run_pipeline(video_path, display_output=False):
                 else:
                     # Face cannot be found by mediapipe
                     if identity in missed_frame_count:
-                        print(f"{frame_timestamp}: Missed frame for {identity}")
+                        # print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value

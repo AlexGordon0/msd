@@ -248,7 +248,7 @@ def _collapse_intervals(intervals: list[AtomicInterval]) -> list[dict]:
             output.append(
                 {
                     "start": round(current_start_ms / 1000, 3),
-                    "duration": round((current_end_ms - current_start_ms) / 1000, 3),
+                    "end": round(current_end_ms / 1000, 3),
                     "speaker": current_speaker,
                 }
             )
@@ -260,7 +260,7 @@ def _collapse_intervals(intervals: list[AtomicInterval]) -> list[dict]:
     output.append(
         {
             "start": round(current_start_ms / 1000, 3),
-            "duration": round((current_end_ms - current_start_ms) / 1000, 3),
+            "end": round(current_end_ms / 1000, 3),
             "speaker": current_speaker,
         }
     )
