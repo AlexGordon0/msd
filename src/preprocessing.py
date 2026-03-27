@@ -113,8 +113,8 @@ def get_landmarks(frame):
     landmarks = result.face_landmarks[0]
     lip_coords = np.array([[landmarks[i].x, landmarks[i].y] for i in LIP_INDICES])
 
-    center = lip_coords.mean(axis=0)
-    lip_coords -= center
+    centre = lip_coords.mean(axis=0)
+    lip_coords -= centre
 
     return lip_coords, True
 

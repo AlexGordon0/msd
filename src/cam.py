@@ -4,11 +4,13 @@ from pathlib import Path
 from queue import Queue
 
 import cv2
+import torch
 import mediapipe as mp
 import numpy as np
 from deepface import DeepFace
 
 from src.rttm_utils import evaluate_diarisation, save_to_rttm
+from src.train_nn import SpeechDetectorNN
 
 
 class FileVideoStream:
@@ -138,6 +140,7 @@ LIP_INDICES = [
 ]
 
 mp_landmarker_path = "models/face_landmarker.task"
+speech_model_path = "models/speech_detector_simple_200_epochs.pth"
 
 BaseOptions = mp.tasks.BaseOptions
 FaceLandmarker = mp.tasks.vision.FaceLandmarker
@@ -217,41 +220,28 @@ def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=1)
     )
 
 
-def _update_speech_status(
-    landmarks, identity, history_dict, face_mem, segments, timestamp, fps
-):
+def _normalise_landmarks(landmarks):
+    centre = landmarks.mean(axis=0)
+    landmarks -= centre
+    return landmarks
+
+
+def _update_speech_status(model, landmarks_data):
     """
-    Update the speaking status of the speaker based off of mouth ratio variance
+    Update the speaking status of the speaker based off of landmark history
     """
-    p_top, p_bottom = landmarks[13], landmarks[14]
-    p_left, p_right = landmarks[61], landmarks[291]
 
-    v_dist = np.linalg.norm((p_top.x - p_bottom.x, p_top.y - p_bottom.y))
-    h_dist = np.linalg.norm((p_left.x - p_right.x, p_left.y - p_right.y))
-    mar = v_dist / h_dist
+    landmarks_tensor = torch.tensor(landmarks_data, dtype=torch.float32)
 
-    history = history_dict.setdefault(identity, [])
-    history.append(mar)
-    if len(history) > int(fps):
-        history.pop(0)
+    with torch.no_grad():
+        raw_logits = model(landmarks_tensor)
 
-    # If MAR variance is high, they are likely speaking
-    mouth_ratio_variance_threshold = 0.0015
-    is_speaking = np.var(history) > mouth_ratio_variance_threshold
-
-    was_speaking = face_mem[identity]["is_speaking"]
-    if is_speaking and not was_speaking:
-        # The person has just started speaking
-        face_mem[identity]["start_time"] = timestamp
-    elif not is_speaking and was_speaking:
-        # Person has just finished speaking
-        _add_segment(face_mem, segments, identity, timestamp)
-
-    face_mem[identity]["is_speaking"] = is_speaking
-    return is_speaking
+        probability = torch.sigmoid(raw_logits)
+        is_speaking = probability > 0.5
+        return is_speaking, probability
 
 
-def _draw_face_info(frame, landmarks, bbox, is_speaking, SCALE):
+def _draw_face_info(frame, landmarks, bbox, is_speaking, confidence, SCALE):
     """
     Draw list of landmarks and bounding box onto the given frame
     If is_speaking is True, then bounding box is green, otherwise red
@@ -294,27 +284,29 @@ def _draw_face_info(frame, landmarks, bbox, is_speaking, SCALE):
 
 
 def run_pipeline(video_path, display_output=False):
-    face_memory = {}  # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0}, ..., }
-    mouth_ratio_history = {}  # Stores mouth ratio history for each speaker
+    # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, 2) array}, ..., }
+    face_memory = {}
+    face_id_counter = 0
     missed_frame_count = {}
     segments = []
-    face_id_counter = 0
 
     SCALE = 0.25
 
     fvs = FileVideoStream(video_path).start()
-    fps = int(fvs.fps)
+    fps = fvs.fps
     time_per_frame = 1000 / fps
+
+    model = SpeechDetectorNN()
+    model.load_state_dict(torch.load(speech_model_path, weights_only=True))
+    model.eval()
 
     with FaceLandmarker.create_from_options(landmarker_options) as landmarker:
         frame_count = 0
-        start_time = int(time.time() * 1000)
 
         force_recalibration = True
         while fvs.more():
             frame = fvs.read()
 
-            frame_start_time = int(time.time() * 1000)
             frame_timestamp = int(time_per_frame * frame_count)
             resized_frame = cv2.resize(frame, None, fx=SCALE, fy=SCALE)
 
@@ -328,9 +320,9 @@ def run_pipeline(video_path, display_output=False):
                         _add_segment(
                             face_memory, segments, identity, frame_timestamp, 0
                         )
+
                 missed_frame_count = {}
 
-                # Heavy detection logic runs on key frames
                 faces = DeepFace.extract_faces(
                     img_path=resized_frame,
                     detector_backend="retinaface",
@@ -381,6 +373,7 @@ def run_pipeline(video_path, display_output=False):
                             "bbox": rect,
                             "is_speaking": False,
                             "start_time": 0.0,
+                            "landmarks_memory": [],
                         }
                     else:
                         face_memory[identity]["bbox"] = rect
@@ -417,35 +410,56 @@ def run_pipeline(video_path, display_output=False):
                 result = landmarker.detect(mp_image)
 
                 expanded_box = [x1, y1, x2 - x1, y2 - y1]
+
                 if result.face_landmarks:
                     if (
                         missed_frame_count.get(identity, 0) != 0
                         and face_memory[identity]["is_speaking"]
                     ):
-                        # Face has been hidden from frame
-                        # Add segment with 0 confidence
+                        # Face has been hidden from frame, add segment with 0 confidence
                         _add_segment(
                             face_memory, segments, identity, frame_timestamp, 0
                         )
                         face_memory[identity]["start_time"] = frame_timestamp
                     missed_frame_count[identity] = 0
                     landmarks = result.face_landmarks[0]
+
+                    normalised_landmarks = _normalise_landmarks(landmarks)
                     new_rect = _get_bounding_box(landmarks, expanded_box)
 
-                    # Calculate MAR and Update segments
-                    is_speaking = _update_speech_status(
-                        landmarks,
-                        identity,
-                        mouth_ratio_history,
-                        face_memory,
-                        segments,
-                        frame_timestamp,
-                        fps,
+                    landmarks_memory = face_memory[identity]["landmarks_memory"]
+                    landmarks_memory.append(normalised_landmarks)
+                    if len(landmarks_memory) > 38:
+                        landmarks_memory.pop(0)
+
+                    # Predict speaking status using neural network
+                    np_landmarks = np.array(landmarks_memory)
+                    print(np_landmarks.shape)
+                    exit(1)
+                    is_speaking, confidence = _update_speech_status(
+                        model, landmarks_memory
                     )
+
+                    was_speaking = face_memory[identity]["is_speaking"]
+                    if is_speaking and not was_speaking:
+                        # The person has just started speaking
+                        face_memory[identity]["start_time"] = frame_timestamp
+                    elif not is_speaking and was_speaking:
+                        # Person has just finished speaking
+                        _add_segment(
+                            face_memory, segments, identity, frame_timestamp, confidence
+                        )
+
+                    face_memory[identity]["is_speaking"] = is_speaking
 
                     if display_output:
                         _draw_face_info(
-                            frame, landmarks, expanded_box, is_speaking, SCALE
+                            frame,
+                            landmarks,
+                            expanded_box,
+                            is_speaking,
+                            confidence,
+                            SCALE,
                         )
 
                     # Update the bounding box for the next frame
