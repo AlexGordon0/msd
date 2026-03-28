@@ -17,12 +17,13 @@ class SpeechDetectorNN(nn.Module):
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout,
+            bidirectional=True,
         )
 
         # self.fc1 = nn.Linear(hidden_size, 32)
         # self.relu = nn.ReLU()
         # self.fc2 = nn.Linear(32, 1)
-        self.fc = nn.Linear(hidden_size, 1)
+        self.fc = nn.Linear(hidden_size * 2, 1)
 
     def forward(self, x):
         # x input shape: (batch_size, 38, 80, 2)
