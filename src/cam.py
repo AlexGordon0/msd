@@ -220,10 +220,10 @@ def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=1)
     )
 
 
-def _normalise_landmarks(landmarks):
-    centre = landmarks.mean(axis=0)
-    landmarks -= centre
-    return landmarks
+def _normalise_landmarks(np_landmarks):
+    centre = np_landmarks.mean(axis=0)
+    np_landmarks -= centre
+    return np_landmarks
 
 
 def _update_speech_status(model, landmarks_data):
@@ -232,6 +232,7 @@ def _update_speech_status(model, landmarks_data):
     """
 
     landmarks_tensor = torch.tensor(landmarks_data, dtype=torch.float32)
+    landmarks_tensor = landmarks_tensor.unsqueeze(0)
 
     with torch.no_grad():
         raw_logits = model(landmarks_tensor)
@@ -241,7 +242,7 @@ def _update_speech_status(model, landmarks_data):
         return is_speaking, probability
 
 
-def _draw_face_info(frame, landmarks, bbox, is_speaking, confidence, SCALE):
+def _draw_face_info(frame, landmarks, mean, bbox, is_speaking, confidence, SCALE):
     """
     Draw list of landmarks and bounding box onto the given frame
     If is_speaking is True, then bounding box is green, otherwise red
@@ -254,15 +255,14 @@ def _draw_face_info(frame, landmarks, bbox, is_speaking, confidence, SCALE):
     abs_x2 = int((x + w) / SCALE)
     abs_y2 = int((y + h) / SCALE)
 
-    for index in LIP_INDICES:
-        landmark = landmarks[index]
+    landmark_colour = (255, 0, 0)
+    for i in LIP_INDICES:
+        landmark = landmarks[i]
 
         frame_x = int(abs_x1 + landmark.x * w / SCALE)
         frame_y = int(abs_y1 + landmark.y * h / SCALE)
 
-        landmark_colour = (255, 0, 0)
-
-        frame = cv2.circle(
+        cv2.circle(
             frame,
             (
                 frame_x,
@@ -273,14 +273,28 @@ def _draw_face_info(frame, landmarks, bbox, is_speaking, confidence, SCALE):
             -1,
         )
 
-        border_colour = (0, 255, 0) if is_speaking else (0, 0, 255)
-        frame = cv2.rectangle(
-            frame,
-            (abs_x1, abs_y1),
-            (abs_x2, abs_y2),
-            border_colour,
-            3,
-        )
+    mean_x = int(abs_x1 + mean[0] * w / SCALE)
+    mean_y = int(abs_y1 + mean[1] * h / SCALE)
+
+    cv2.circle(
+        frame,
+        (
+            mean_x,
+            mean_y,
+        ),
+        5,
+        (0, 0, 255),
+        -1,
+    )
+
+    border_colour = (0, 255, 0) if is_speaking else (0, 0, 255)
+    cv2.rectangle(
+        frame,
+        (abs_x1, abs_y1),
+        (abs_x2, abs_y2),
+        border_colour,
+        3,
+    )
 
 
 def run_pipeline(video_path, display_output=False):
@@ -297,7 +311,12 @@ def run_pipeline(video_path, display_output=False):
     time_per_frame = 1000 / fps
 
     model = SpeechDetectorNN()
-    model.load_state_dict(torch.load(speech_model_path, weights_only=True))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.load_state_dict(
+        torch.load(
+            speech_model_path, map_location=torch.device(device), weights_only=True
+        )
+    )
     model.eval()
 
     with FaceLandmarker.create_from_options(landmarker_options) as landmarker:
@@ -424,7 +443,13 @@ def run_pipeline(video_path, display_output=False):
                     missed_frame_count[identity] = 0
                     landmarks = result.face_landmarks[0]
 
-                    normalised_landmarks = _normalise_landmarks(landmarks)
+                    lip_landmarks = np.array(
+                        [[landmarks[i].x, landmarks[i].y] for i in LIP_INDICES]
+                    )
+                    # print(lip_landmarks)
+                    # print(lip_landmarks.mean(axis=0))
+
+                    normalised_landmarks = _normalise_landmarks(lip_landmarks.copy())
                     new_rect = _get_bounding_box(landmarks, expanded_box)
 
                     landmarks_memory = face_memory[identity]["landmarks_memory"]
@@ -432,13 +457,20 @@ def run_pipeline(video_path, display_output=False):
                     if len(landmarks_memory) > 38:
                         landmarks_memory.pop(0)
 
+                    np_landmarks_memory = np.array(landmarks_memory)
+
                     # Predict speaking status using neural network
-                    np_landmarks = np.array(landmarks_memory)
-                    print(np_landmarks.shape)
-                    exit(1)
-                    is_speaking, confidence = _update_speech_status(
-                        model, landmarks_memory
-                    )
+                    if len(np_landmarks_memory) == 38:
+                        is_speaking, confidence = _update_speech_status(
+                            model, np_landmarks_memory
+                        )
+                    else:
+                        is_speaking, confidence = False, 0.0
+
+                    # if identity == "SPEAKER_02":
+                    #     print(f"{identity}: {is_speaking}, {confidence}")
+                    #     print(f"{lip_landmarks}")
+                    #     print(f"{identity} mean: {lip_landmarks.mean(axis=0)}")
 
                     was_speaking = face_memory[identity]["is_speaking"]
                     if is_speaking and not was_speaking:
@@ -456,6 +488,7 @@ def run_pipeline(video_path, display_output=False):
                         _draw_face_info(
                             frame,
                             landmarks,
+                            lip_landmarks.mean(axis=0),
                             expanded_box,
                             is_speaking,
                             confidence,
@@ -509,7 +542,7 @@ if __name__ == "__main__":
 
     videos = Path("data/videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/GSfP1mX7R-g_0.mp4")
+        video = Path("data/videos/4A8orzGYQRI_2.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, True)
