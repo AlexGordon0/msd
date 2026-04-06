@@ -542,7 +542,7 @@ if __name__ == "__main__":
 
     videos = Path("data/videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/4A8orzGYQRI_2.mp4")
+        video = Path("data/videos/4A8orzGYQRI_2.mp4") # Remove if doing full video baseline
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, True)
