@@ -1,4 +1,5 @@
 import h5py
+import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,39 +8,83 @@ from sklearn.model_selection import train_test_split
 from pathlib import Path
 
 
-class SpeechDetectorNN(nn.Module):
-    def __init__(self, input_size=160, hidden_size=64, num_layers=2, dropout=0.2):
-        super(SpeechDetectorNN, self).__init__()
-
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=dropout,
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=50):
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)
         )
-
-        # self.fc1 = nn.Linear(hidden_size, 32)
-        # self.relu = nn.ReLU()
-        # self.fc2 = nn.Linear(32, 1)
-        self.fc = nn.Linear(hidden_size, 1)
+        pe = torch.zeros(1, max_len, d_model)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe)
 
     def forward(self, x):
-        # x input shape: (batch_size, 38, 80, 2)
+        x = x + self.pe[:, : x.size(1), :]
+        return self.dropout(x)
+
+
+class SpeechDetectorTransformer(nn.Module):
+    def __init__(
+        self,
+        num_landmarks=80,
+        coords=2,
+        d_model=128,
+        nhead=4,
+        num_layers=3,
+        dim_feedforward=256,
+        dropout=0.1,
+    ):
+        super().__init__()
+        self.input_dim = num_landmarks * coords
+
+        self.embedding = nn.Linear(self.input_dim, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, dropout, max_len=38)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, 1),
+        )
+
+    def forward(self, x):
         batch_size, seq_len, num_points, dims = x.size()
 
-        # Flatten to (batch_size, 38, 160)
         x = x.view(batch_size, seq_len, num_points * dims)
 
-        output, (hn, cn) = self.lstm(x)
-        final_frame_output = output[:, -1, :]
+        src_key_padding_mask = x.abs().sum(dim=-1) == 0
 
-        logits = self.fc(final_frame_output)
+        x = self.embedding(x)
+        x = self.pos_encoder(x)
+
+        out = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+
+        valid_mask = (~src_key_padding_mask).unsqueeze(-1).float()
+
+        sum_valid = valid_mask.sum(dim=1).clamp(min=1e-9)
+
+        pooled = (out * valid_mask).sum(dim=1) / sum_valid
+
+        logits = self.classifier(pooled)
         return logits
 
 
-data_path = Path("data/lip_landmarks.h5")
-model_save_path = Path("models/speech_detector_weights.pth")
+data_path = Path("data/lip_landmarks_2d.h5")
+model_save_path = Path("models/speech_detector_transformer_2d_weights.pth")
 model_save_path.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -58,10 +103,10 @@ def run_training(X_train, y_train, X_val, y_val):
     val_dataloader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SpeechDetectorNN().to(device)
+    model = SpeechDetectorTransformer().to(device)
 
     criterion = nn.BCEWithLogitsLoss()
-    optimiser = optim.Adam(model.parameters(), lr=0.001)
+    optimiser = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
     best_val_loss = float("inf")
 
@@ -80,6 +125,7 @@ def run_training(X_train, y_train, X_val, y_val):
             loss = criterion(predictions, batch_y)
 
             loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimiser.step()
 
             train_loss += loss.item() * batch_X.size(0)
@@ -122,7 +168,7 @@ def run_training(X_train, y_train, X_val, y_val):
 
 def run_testing(X_test, y_test):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SpeechDetectorNN().to(device)
+    model = SpeechDetectorTransformer().to(device)
     model.load_state_dict(torch.load(model_save_path))
     model.eval()
 
