@@ -11,7 +11,7 @@ from deepface import DeepFace
 
 from src.rttm_utils import evaluate_diarisation, save_to_rttm
 from src.preprocessing import get_normalised_mouth
-from src.train_nn import SpeechDetectorNN
+from src.train_nn import SpeechDetectorTransformer
 
 
 class FileVideoStream:
@@ -311,7 +311,7 @@ def run_pipeline(video_path, display_output=False):
     fps = fvs.fps
     time_per_frame = 1000 / fps
 
-    model = SpeechDetectorNN()
+    model = SpeechDetectorTransformer()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.load_state_dict(
         torch.load(
