@@ -10,6 +10,7 @@ import numpy as np
 from deepface import DeepFace
 
 from src.rttm_utils import evaluate_diarisation, save_to_rttm
+from src.preprocessing import get_normalised_mouth
 from src.train_nn import SpeechDetectorNN
 
 
@@ -441,6 +442,8 @@ def run_pipeline(video_path, display_output=False):
                         )
                         face_memory[identity]["start_time"] = frame_timestamp
                     missed_frame_count[identity] = 0
+
+                    normalised_landmarks = get_normalised_mouth(result)
                     landmarks = result.face_landmarks[0]
 
                     lip_landmarks = np.array(
@@ -449,7 +452,6 @@ def run_pipeline(video_path, display_output=False):
                     # print(lip_landmarks)
                     # print(lip_landmarks.mean(axis=0))
 
-                    normalised_landmarks = _normalise_landmarks(lip_landmarks.copy())
                     new_rect = _get_bounding_box(landmarks, expanded_box)
 
                     landmarks_memory = face_memory[identity]["landmarks_memory"]

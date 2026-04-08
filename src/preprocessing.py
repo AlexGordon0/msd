@@ -99,35 +99,58 @@ landmarker_options = FaceLandmarkerOptions(
         model_asset_path=mp_landmarker_path,
     ),
     running_mode=VisionRunningMode.IMAGE,
+    output_facial_transformation_matrixes=True,
     num_faces=1,
 )
 landmarker = FaceLandmarker.create_from_options(landmarker_options)
+
+
+def get_normalised_mouth(detection_result):
+    landmarks = detection_result.face_landmarks[0]
+
+    matrix = detection_result.facial_transformation_matrixes[0].data
+    matrix = np.array(matrix).reshape(4, 4)
+    inv_matrix = np.linalg.inv(matrix)
+
+    normalised_mouth = []
+    for i in LIP_INDICES:
+        landmark = landmarks[i]
+        v = np.array([landmark.x, landmark.y, landmark.z, 1.0])
+
+        v_norm = np.dot(inv_matrix, v)
+
+        normalised_mouth.append(v_norm[:3])
+
+    normalised_mouth = np.array(normalised_mouth)
+
+    centre = normalised_mouth.mean(axis=0)
+    normalised_mouth -= centre
+
+    return normalised_mouth
+
 
 def get_landmarks(frame):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
     result = landmarker.detect(mp_image)
 
     if not result.face_landmarks:
-        return np.zeros((len(LIP_INDICES), 2)), False
+        return np.zeros((len(LIP_INDICES), 3)), False
 
-    landmarks = result.face_landmarks[0]
-    lip_coords = np.array([[landmarks[i].x, landmarks[i].y] for i in LIP_INDICES])
-
-    centre = lip_coords.mean(axis=0)
-    lip_coords -= centre
-
-    return lip_coords, True
+    normalised_mouth = get_normalised_mouth(result)
+    return normalised_mouth, True
 
 
 face_images_path = Path("data/faceImages_small.h5")
-landmarkers_path = Path("data/lip_landmarks.h5")
+landmarkers_path = Path("data/lip_landmarks_3d.h5")
 
 with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as wf:
     for split in ["train", "test"]:
         x = rf[f"x_{split}"]
         y = rf[f"y_{split}"]
 
-        wf_x = wf.create_dataset(f"x_{split}", (len(x), 38, len(LIP_INDICES), 2), dtype="float32")
+        wf_x = wf.create_dataset(
+            f"x_{split}", (len(x), 38, len(LIP_INDICES), 3), dtype="float32"
+        )
         wf_y = wf.create_dataset(f"y_{split}", data=y)
 
         for i in range(len(x)):
@@ -144,6 +167,5 @@ with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as
                 clip_landmarks.append(landmark_coords)
 
             print(f"{success_count / 38 * 100}%")
-            
-            wf_x[i] = np.array(clip_landmarks)
 
+            wf_x[i] = np.array(clip_landmarks)
