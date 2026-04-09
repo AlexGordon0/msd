@@ -9,12 +9,12 @@ from pathlib import Path
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=50):
+    def __init__(self, d_model, dims=2, dropout=0.1, max_len=50):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)
+            torch.arange(0, d_model, dims) * (-math.log(10000.0) / d_model)
         )
         pe = torch.zeros(1, max_len, d_model)
         pe[0, :, 0::2] = torch.sin(position * div_term)
@@ -41,7 +41,7 @@ class SpeechDetectorTransformer(nn.Module):
         self.input_dim = num_landmarks * coords
 
         self.embedding = nn.Linear(self.input_dim, d_model)
-        self.pos_encoder = PositionalEncoding(d_model, dropout, max_len=38)
+        self.pos_encoder = PositionalEncoding(d_model, coords, dropout, max_len=38)
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -66,7 +66,7 @@ class SpeechDetectorTransformer(nn.Module):
 
         x = x.view(batch_size, seq_len, num_points * dims)
 
-        src_key_padding_mask = x.abs().sum(dim=-1) == 0
+        src_key_padding_mask = x.abs().sum(dim=-1) < 1e-6
 
         x = self.embedding(x)
         x = self.pos_encoder(x)
@@ -83,9 +83,11 @@ class SpeechDetectorTransformer(nn.Module):
         return logits
 
 
-data_path = Path("data/lip_landmarks_2d.h5")
+data_path = Path("data/lip_landmarks_2d_cleaned.h5")
 model_save_path = Path("models/speech_detector_transformer_2d_weights.pth")
 model_save_path.parent.mkdir(parents=True, exist_ok=True)
+
+DIMS = 2
 
 
 def run_training(X_train, y_train, X_val, y_val):
@@ -103,7 +105,7 @@ def run_training(X_train, y_train, X_val, y_val):
     val_dataloader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SpeechDetectorTransformer().to(device)
+    model = SpeechDetectorTransformer(coords=DIMS).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
     optimiser = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
@@ -168,7 +170,7 @@ def run_training(X_train, y_train, X_val, y_val):
 
 def run_testing(X_test, y_test):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SpeechDetectorTransformer().to(device)
+    model = SpeechDetectorTransformer(coords=DIMS).to(device)
     model.load_state_dict(torch.load(model_save_path))
     model.eval()
 
