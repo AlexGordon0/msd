@@ -505,7 +505,7 @@ def run_pipeline(video_path, display_output=False):
                     if identity in missed_frame_count:
                         # print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
-                        face_memory[identity]["landmarks_memory"].append(np.zeros(80, 2))
+                        face_memory[identity]["landmarks_memory"].append(np.zeros((80, 2)))
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value
                         if (
@@ -551,6 +551,6 @@ if __name__ == "__main__":
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, True)
-        print(segments)
+        # print(segments)
         save_to_rttm(segments, video.stem, output_path)
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)
