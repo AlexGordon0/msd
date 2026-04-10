@@ -159,7 +159,7 @@ if __name__ == "main":
 
                 for frame_idx in range(38):
                     frame = video[frame_idx]
-                    landmark_coords, success = get_landmarks(frame)
+                    landmark_coords, success = get_landmarks(frame, 3)
                     if success:
                         success_count += 1
 
