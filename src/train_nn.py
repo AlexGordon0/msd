@@ -38,8 +38,8 @@ class SpeechDetectorNN(nn.Module):
         return logits
 
 
-data_path = Path("data/lip_landmarks.h5")
-model_save_path = Path("models/speech_detector_weights.pth")
+data_path = Path("data/lip_landmarks_2d_cleaned.h5")
+model_save_path = Path("models/speech_detector_lstm_2d.pth")
 model_save_path.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -64,6 +64,9 @@ def run_training(X_train, y_train, X_val, y_val):
     optimiser = optim.Adam(model.parameters(), lr=0.001)
 
     best_val_loss = float("inf")
+    patience = 15
+    min_delta = 0.0001
+    counter = 0
 
     epochs = 200
     for epoch in range(epochs):
@@ -110,14 +113,20 @@ def run_training(X_train, y_train, X_val, y_val):
         avg_val_loss = val_loss / len(val_dataset)
         avg_val_acc = val_correct / len(val_dataset)
 
-        if avg_val_loss < best_val_loss:
+        if avg_val_loss < (best_val_loss - min_delta):
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), model_save_path)
+            counter = 0
+        else:
+            counter += 1
 
         print(f"Epoch [{epoch + 1}/{epochs}]")
         print(f"  Train Loss: {avg_train_loss:.4f} | Acc: {avg_train_acc:.2%}")
         print(f"  Val Loss:     {avg_val_loss:.4f} | Acc: {avg_val_acc:.2%}")
         print("-" * 30)
+
+        if counter >= patience:
+            break
 
 
 def run_testing(X_test, y_test):
