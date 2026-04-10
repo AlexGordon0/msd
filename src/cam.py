@@ -529,8 +529,8 @@ def run_pipeline(video_path, display_output=False):
 
 if __name__ == "__main__":
     ground_truth_path = Path("data/ground_truths")
-    output_csv_path = Path("data/lstm_2d_results.csv")
-    diarised_path = Path("data/lstm_2d_diarisation")
+    output_csv_path = Path(f"data/lstm_{DIMS}d_results.csv")
+    diarised_path = Path(f"data/lstm_{DIMS}d_diarisation")
     diarised_path.mkdir(parents=True, exist_ok=True)
 
     videos = Path("data/processed_videos").glob("*.mp4")
