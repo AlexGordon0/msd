@@ -336,14 +336,6 @@ def run_pipeline(video_path, display_output=False):
             if force_recalibration:
                 force_recalibration = False
 
-                for identity, data in missed_frame_count.items():
-                    if data != 0:
-                        # Face has been hidden from frame
-                        # Add segment with 0 confidence
-                        _add_segment(
-                            face_memory, segments, identity, frame_timestamp, 0
-                        )
-
                 missed_frame_count = {}
 
                 faces = DeepFace.extract_faces(
@@ -439,10 +431,6 @@ def run_pipeline(video_path, display_output=False):
                         missed_frame_count.get(identity, 0) != 0
                         and face_memory[identity]["is_speaking"]
                     ):
-                        # Face has been hidden from frame, add segment with 0 confidence
-                        _add_segment(
-                            face_memory, segments, identity, frame_timestamp, 0
-                        )
                         face_memory[identity]["start_time"] = frame_timestamp
                     missed_frame_count[identity] = 0
 
