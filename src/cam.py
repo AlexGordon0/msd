@@ -550,7 +550,7 @@ if __name__ == "__main__":
         # )  # Remove if doing full video baseline
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
-        segments = run_pipeline(video, True)
+        segments = run_pipeline(video, False)
         # print(segments)
         save_to_rttm(segments, video.stem, output_path)
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)
