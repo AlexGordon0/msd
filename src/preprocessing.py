@@ -143,32 +143,33 @@ def get_landmarks(frame, dims):
 face_images_path = Path("data/faceImages_small.h5")
 landmarkers_path = Path("data/lip_landmarks_3d_cleaned.h5")
 
-with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as wf:
-    for split in ["train", "test"]:
-        x = rf[f"x_{split}"]
-        y = rf[f"y_{split}"]
+if __name__ == "main":
+    with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as wf:
+        for split in ["train", "test"]:
+            x = rf[f"x_{split}"]
+            y = rf[f"y_{split}"]
 
-        x_data = []
-        y_data = []
+            x_data = []
+            y_data = []
 
-        for i in range(len(x)):
-            video = x[i]
-            clip_landmarks = []
-            success_count = 0
+            for i in range(len(x)):
+                video = x[i]
+                clip_landmarks = []
+                success_count = 0
 
-            for frame_idx in range(38):
-                frame = video[frame_idx]
-                landmark_coords, success = get_landmarks(frame)
-                if success:
-                    success_count += 1
+                for frame_idx in range(38):
+                    frame = video[frame_idx]
+                    landmark_coords, success = get_landmarks(frame)
+                    if success:
+                        success_count += 1
 
-                clip_landmarks.append(landmark_coords)
+                    clip_landmarks.append(landmark_coords)
 
-            print(f"{success_count / 38 * 100}%")
+                print(f"{success_count / 38 * 100}%")
 
-            if success_count > 12:
-                x_data.append(clip_landmarks)
-                y_data.append(y[i])
+                if success_count > 12:
+                    x_data.append(clip_landmarks)
+                    y_data.append(y[i])
 
-        wf.create_dataset(f"x_{split}", data=x_data)
-        wf.create_dataset(f"y_{split}", data=y_data)
+            wf.create_dataset(f"x_{split}", data=x_data)
+            wf.create_dataset(f"y_{split}", data=y_data)
