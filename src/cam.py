@@ -140,8 +140,10 @@ LIP_INDICES = [
     415,
 ]
 
+DIMS = 2
+
 mp_landmarker_path = "models/face_landmarker.task"
-speech_model_path = "models/speech_detector_simple_200_epochs.pth"
+speech_model_path = f"models/speech_detector_transformer_{DIMS}d.pth"
 
 BaseOptions = mp.tasks.BaseOptions
 FaceLandmarker = mp.tasks.vision.FaceLandmarker
@@ -154,6 +156,7 @@ landmarker_options = FaceLandmarkerOptions(
         model_asset_path=mp_landmarker_path,
     ),
     running_mode=VisionRunningMode.IMAGE,
+    output_facial_transformation_matrixes=True,
     num_faces=1,
 )
 
@@ -299,7 +302,7 @@ def _draw_face_info(frame, landmarks, mean, bbox, is_speaking, confidence, SCALE
 
 
 def run_pipeline(video_path, display_output=False):
-    # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, 2) array}, ..., }
+    # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, DIMS) array}, ..., }
     face_memory = {}
     face_id_counter = 0
     missed_frame_count = {}
@@ -311,7 +314,7 @@ def run_pipeline(video_path, display_output=False):
     fps = fvs.fps
     time_per_frame = 1000 / fps
 
-    model = SpeechDetectorTransformer()
+    model = SpeechDetectorTransformer(coords=DIMS)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.load_state_dict(
         torch.load(
@@ -332,14 +335,6 @@ def run_pipeline(video_path, display_output=False):
 
             if force_recalibration:
                 force_recalibration = False
-
-                for identity, data in missed_frame_count.items():
-                    if data != 0:
-                        # Face has been hidden from frame
-                        # Add segment with 0 confidence
-                        _add_segment(
-                            face_memory, segments, identity, frame_timestamp, 0
-                        )
 
                 missed_frame_count = {}
 
@@ -436,14 +431,10 @@ def run_pipeline(video_path, display_output=False):
                         missed_frame_count.get(identity, 0) != 0
                         and face_memory[identity]["is_speaking"]
                     ):
-                        # Face has been hidden from frame, add segment with 0 confidence
-                        _add_segment(
-                            face_memory, segments, identity, frame_timestamp, 0
-                        )
                         face_memory[identity]["start_time"] = frame_timestamp
                     missed_frame_count[identity] = 0
 
-                    normalised_landmarks = get_normalised_mouth(result)
+                    normalised_landmarks = get_normalised_mouth(result, DIMS)
                     landmarks = result.face_landmarks[0]
 
                     lip_landmarks = np.array(
@@ -502,8 +493,11 @@ def run_pipeline(video_path, display_output=False):
                 else:
                     # Face cannot be found by mediapipe
                     if identity in missed_frame_count:
-                        print(f"{frame_timestamp}: Missed frame for {identity}")
+                        # print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
+                        face_memory[identity]["landmarks_memory"].append(
+                            np.zeros((80, DIMS))
+                        )
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value
                         if (
@@ -536,19 +530,18 @@ def run_pipeline(video_path, display_output=False):
 
 
 if __name__ == "__main__":
-    videos_path = Path("data/videos")
     ground_truth_path = Path("data/ground_truths")
-    output_csv_path = Path("data/video_only_results.csv")
-    diarised_path = Path("data/diarised_video")
+    output_csv_path = Path(f"data/transformer_{DIMS}d_results.csv")
+    diarised_path = Path(f"data/transformer_{DIMS}d_diarisation")
     diarised_path.mkdir(parents=True, exist_ok=True)
 
-    videos = Path("data/videos").glob("*.mp4")
+    videos = Path("data/processed_videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/4A8orzGYQRI_2.mp4") # Remove if doing full video baseline
+        # video = Path(
+        #     "data/videos/4A8orzGYQRI_2.mp4"
+        # )  # Remove if doing full video baseline
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
-        segments = run_pipeline(video, True)
-        print(segments)
+        segments = run_pipeline(video, False)
         save_to_rttm(segments, video.stem, output_path)
-        break
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)

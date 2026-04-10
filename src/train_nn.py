@@ -9,12 +9,12 @@ from pathlib import Path
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dims=2, dropout=0.1, max_len=50):
+    def __init__(self, d_model, dropout=0.1, max_len=50):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, d_model, dims) * (-math.log(10000.0) / d_model)
+            torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)
         )
         pe = torch.zeros(1, max_len, d_model)
         pe[0, :, 0::2] = torch.sin(position * div_term)
@@ -41,7 +41,7 @@ class SpeechDetectorTransformer(nn.Module):
         self.input_dim = num_landmarks * coords
 
         self.embedding = nn.Linear(self.input_dim, d_model)
-        self.pos_encoder = PositionalEncoding(d_model, coords, dropout, max_len=38)
+        self.pos_encoder = PositionalEncoding(d_model, dropout, max_len=38)
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
