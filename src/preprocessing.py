@@ -141,17 +141,15 @@ def get_landmarks(frame):
 
 
 face_images_path = Path("data/faceImages_small.h5")
-landmarkers_path = Path("data/lip_landmarks_3d.h5")
+landmarkers_path = Path("data/lip_landmarks_3d_cleaned.h5")
 
 with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as wf:
     for split in ["train", "test"]:
         x = rf[f"x_{split}"]
         y = rf[f"y_{split}"]
 
-        wf_x = wf.create_dataset(
-            f"x_{split}", (len(x), 38, len(LIP_INDICES), 3), dtype="float32"
-        )
-        wf_y = wf.create_dataset(f"y_{split}", data=y)
+        x_data = []
+        y_data = []
 
         for i in range(len(x)):
             video = x[i]
@@ -168,4 +166,9 @@ with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as
 
             print(f"{success_count / 38 * 100}%")
 
-            wf_x[i] = np.array(clip_landmarks)
+            if success_count > 12:
+                x_data.append(clip_landmarks)
+                y_data.append(y[i])
+
+        wf.create_dataset(f"x_{split}", data=x_data)
+        wf.create_dataset(f"y_{split}", data=y_data)
