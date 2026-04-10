@@ -143,29 +143,30 @@ def get_landmarks(frame):
 face_images_path = Path("data/faceImages_small.h5")
 landmarkers_path = Path("data/lip_landmarks_3d.h5")
 
-with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as wf:
-    for split in ["train", "test"]:
-        x = rf[f"x_{split}"]
-        y = rf[f"y_{split}"]
+if __name__ == "__main__":
+    with h5py.File(face_images_path, "r") as rf, h5py.File(landmarkers_path, "w") as wf:
+        for split in ["train", "test"]:
+            x = rf[f"x_{split}"]
+            y = rf[f"y_{split}"]
 
-        wf_x = wf.create_dataset(
-            f"x_{split}", (len(x), 38, len(LIP_INDICES), 3), dtype="float32"
-        )
-        wf_y = wf.create_dataset(f"y_{split}", data=y)
+            wf_x = wf.create_dataset(
+                f"x_{split}", (len(x), 38, len(LIP_INDICES), 3), dtype="float32"
+            )
+            wf_y = wf.create_dataset(f"y_{split}", data=y)
 
-        for i in range(len(x)):
-            video = x[i]
-            clip_landmarks = []
-            success_count = 0
+            for i in range(len(x)):
+                video = x[i]
+                clip_landmarks = []
+                success_count = 0
 
-            for frame_idx in range(38):
-                frame = video[frame_idx]
-                landmark_coords, success = get_landmarks(frame)
-                if success:
-                    success_count += 1
+                for frame_idx in range(38):
+                    frame = video[frame_idx]
+                    landmark_coords, success = get_landmarks(frame)
+                    if success:
+                        success_count += 1
 
-                clip_landmarks.append(landmark_coords)
+                    clip_landmarks.append(landmark_coords)
 
-            print(f"{success_count / 38 * 100}%")
+                print(f"{success_count / 38 * 100}%")
 
-            wf_x[i] = np.array(clip_landmarks)
+                wf_x[i] = np.array(clip_landmarks)

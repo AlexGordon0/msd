@@ -141,7 +141,7 @@ LIP_INDICES = [
 ]
 
 mp_landmarker_path = "models/face_landmarker.task"
-speech_model_path = "models/speech_detector_simple_200_epochs.pth"
+speech_model_path = "models/speech_detector_lstm_2d.pth"
 
 BaseOptions = mp.tasks.BaseOptions
 FaceLandmarker = mp.tasks.vision.FaceLandmarker
@@ -154,6 +154,7 @@ landmarker_options = FaceLandmarkerOptions(
         model_asset_path=mp_landmarker_path,
     ),
     running_mode=VisionRunningMode.IMAGE,
+    output_facial_transformation_matrixes=True,
     num_faces=1,
 )
 
@@ -502,8 +503,9 @@ def run_pipeline(video_path, display_output=False):
                 else:
                     # Face cannot be found by mediapipe
                     if identity in missed_frame_count:
-                        print(f"{frame_timestamp}: Missed frame for {identity}")
+                        # print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
+                        face_memory[identity]["landmarks_memory"].append(np.zeros(80, 2))
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value
                         if (
@@ -536,19 +538,19 @@ def run_pipeline(video_path, display_output=False):
 
 
 if __name__ == "__main__":
-    videos_path = Path("data/videos")
     ground_truth_path = Path("data/ground_truths")
-    output_csv_path = Path("data/video_only_results.csv")
-    diarised_path = Path("data/diarised_video")
+    output_csv_path = Path("data/lstm_2d_results.csv")
+    diarised_path = Path("data/lstm_2d_diarisation")
     diarised_path.mkdir(parents=True, exist_ok=True)
 
-    videos = Path("data/videos").glob("*.mp4")
+    videos = Path("data/processed_videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/4A8orzGYQRI_2.mp4") # Remove if doing full video baseline
+        # video = Path(
+        #     "data/videos/4A8orzGYQRI_2.mp4"
+        # )  # Remove if doing full video baseline
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, True)
         print(segments)
         save_to_rttm(segments, video.stem, output_path)
-        break
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)
