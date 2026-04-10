@@ -140,8 +140,10 @@ LIP_INDICES = [
     415,
 ]
 
+DIMS = 2
+
 mp_landmarker_path = "models/face_landmarker.task"
-speech_model_path = "models/speech_detector_lstm_2d.pth"
+speech_model_path = f"models/speech_detector_lstm_{DIMS}d.pth"
 
 BaseOptions = mp.tasks.BaseOptions
 FaceLandmarker = mp.tasks.vision.FaceLandmarker
@@ -300,7 +302,7 @@ def _draw_face_info(frame, landmarks, mean, bbox, is_speaking, confidence, SCALE
 
 
 def run_pipeline(video_path, display_output=False):
-    # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, 2) array}, ..., }
+    # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, DIMS) array}, ..., }
     face_memory = {}
     face_id_counter = 0
     missed_frame_count = {}
@@ -312,7 +314,7 @@ def run_pipeline(video_path, display_output=False):
     fps = fvs.fps
     time_per_frame = 1000 / fps
 
-    model = SpeechDetectorNN()
+    model = SpeechDetectorNN(input_size=80 * DIMS)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.load_state_dict(
         torch.load(
@@ -444,7 +446,7 @@ def run_pipeline(video_path, display_output=False):
                         face_memory[identity]["start_time"] = frame_timestamp
                     missed_frame_count[identity] = 0
 
-                    normalised_landmarks = get_normalised_mouth(result)
+                    normalised_landmarks = get_normalised_mouth(result, DIMS)
                     landmarks = result.face_landmarks[0]
 
                     lip_landmarks = np.array(
@@ -505,7 +507,7 @@ def run_pipeline(video_path, display_output=False):
                     if identity in missed_frame_count:
                         # print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
-                        face_memory[identity]["landmarks_memory"].append(np.zeros((80, 2)))
+                        face_memory[identity]["landmarks_memory"].append(np.zeros((80, DIMS)))
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value
                         if (
@@ -551,6 +553,7 @@ if __name__ == "__main__":
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
         segments = run_pipeline(video, False)
-        # print(segments)
+        print(segments)
+        break
         save_to_rttm(segments, video.stem, output_path)
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)

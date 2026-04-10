@@ -25,10 +25,10 @@ class SpeechDetectorNN(nn.Module):
         self.fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
-        # x input shape: (batch_size, 38, 80, 2)
+        # x input shape: (batch_size, 38, 80, DIMS)
         batch_size, seq_len, num_points, dims = x.size()
 
-        # Flatten to (batch_size, 38, 160)
+        # Flatten to (batch_size, 38, 80 * DIMS)
         x = x.view(batch_size, seq_len, num_points * dims)
 
         output, (hn, cn) = self.lstm(x)

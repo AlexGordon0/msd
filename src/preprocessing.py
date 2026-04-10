@@ -105,7 +105,7 @@ landmarker_options = FaceLandmarkerOptions(
 landmarker = FaceLandmarker.create_from_options(landmarker_options)
 
 
-def get_normalised_mouth(detection_result):
+def get_normalised_mouth(detection_result, dims):
     landmarks = detection_result.face_landmarks[0]
 
     matrix = detection_result.facial_transformation_matrixes[0].data
@@ -119,7 +119,7 @@ def get_normalised_mouth(detection_result):
 
         v_norm = np.dot(inv_matrix, v)
 
-        normalised_mouth.append(v_norm[:3])
+        normalised_mouth.append(v_norm[:dims])
 
     normalised_mouth = np.array(normalised_mouth)
 
@@ -129,14 +129,14 @@ def get_normalised_mouth(detection_result):
     return normalised_mouth
 
 
-def get_landmarks(frame):
+def get_landmarks(frame, dims):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
     result = landmarker.detect(mp_image)
 
     if not result.face_landmarks:
-        return np.zeros((len(LIP_INDICES), 3)), False
+        return np.zeros((len(LIP_INDICES), dims)), False
 
-    normalised_mouth = get_normalised_mouth(result)
+    normalised_mouth = get_normalised_mouth(result, dims)
     return normalised_mouth, True
 
 
