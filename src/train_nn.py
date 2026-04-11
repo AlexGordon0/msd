@@ -6,6 +6,8 @@ from torch.utils.data import TensorDataset, DataLoader
 from sklearn.model_selection import train_test_split
 from pathlib import Path
 
+DIMS = 3
+
 
 class SpeechDetectorNN(nn.Module):
     def __init__(self, input_size=160, hidden_size=64, num_layers=2, dropout=0.2):
@@ -38,8 +40,8 @@ class SpeechDetectorNN(nn.Module):
         return logits
 
 
-data_path = Path("data/lip_landmarks_2d_cleaned.h5")
-model_save_path = Path("models/speech_detector_lstm_2d.pth")
+data_path = Path(f"data/lip_landmarks_{DIMS}d_cleaned.h5")
+model_save_path = Path(f"models/speech_detector_lstm_{DIMS}d.pth")
 model_save_path.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -58,7 +60,7 @@ def run_training(X_train, y_train, X_val, y_val):
     val_dataloader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SpeechDetectorNN().to(device)
+    model = SpeechDetectorNN(input_size=80 * DIMS).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
     optimiser = optim.Adam(model.parameters(), lr=0.001)
@@ -131,7 +133,7 @@ def run_training(X_train, y_train, X_val, y_val):
 
 def run_testing(X_test, y_test):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SpeechDetectorNN().to(device)
+    model = SpeechDetectorNN(input_size=80 * DIMS).to(device)
     model.load_state_dict(torch.load(model_save_path))
     model.eval()
 
