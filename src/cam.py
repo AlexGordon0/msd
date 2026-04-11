@@ -545,6 +545,7 @@ if __name__ == "__main__":
     diarised_path = Path(f"data/transformer_{DIMS}d_diarisation")
     diarised_path.mkdir(parents=True, exist_ok=True)
 
+    print(speech_model_path)
     model = SpeechDetectorTransformer(coords=DIMS)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.load_state_dict(
