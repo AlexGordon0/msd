@@ -224,12 +224,6 @@ def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=1)
     )
 
 
-def _normalise_landmarks(np_landmarks):
-    centre = np_landmarks.mean(axis=0)
-    np_landmarks -= centre
-    return np_landmarks
-
-
 def _update_speech_status(model, landmarks_data):
     """
     Update the speaking status of the speaker based off of landmark history
@@ -242,8 +236,7 @@ def _update_speech_status(model, landmarks_data):
         raw_logits = model(landmarks_tensor)
 
         probability = torch.sigmoid(raw_logits)
-        is_speaking = probability > 0.5
-        return is_speaking, probability
+        return probability
 
 
 def _draw_face_info(frame, landmarks, mean, bbox, is_speaking, confidence, SCALE):
@@ -300,8 +293,21 @@ def _draw_face_info(frame, landmarks, mean, bbox, is_speaking, confidence, SCALE
         3,
     )
 
+    text_position = (abs_x1, max(abs_y1 - 10, 20))
 
-def run_pipeline(video_path, display_output=False):
+    cv2.putText(
+        frame,
+        f"{confidence:.2f}",
+        text_position,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,  # Font scale
+        border_colour,  # Match text color to the box color
+        2,  # Thickness
+        cv2.LINE_AA,  # Anti-aliased line
+    )
+
+
+def run_pipeline(video_path, model, display_output=False):
     # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, DIMS) array}, ..., }
     face_memory = {}
     face_id_counter = 0
@@ -314,15 +320,6 @@ def run_pipeline(video_path, display_output=False):
     fps = fvs.fps
     time_per_frame = 1000 / fps
 
-    model = SpeechDetectorNN(input_size=80 * DIMS)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.load_state_dict(
-        torch.load(
-            speech_model_path, map_location=torch.device(device), weights_only=True
-        )
-    )
-    model.eval()
-
     with FaceLandmarker.create_from_options(landmarker_options) as landmarker:
         frame_count = 0
 
@@ -331,6 +328,11 @@ def run_pipeline(video_path, display_output=False):
             frame = fvs.read()
 
             frame_timestamp = int(time_per_frame * frame_count)
+
+            # Create timestamp that is half of time that model analyses in total to account for
+            # time it takes model to realise change in activity.
+            practical_timestamp = frame_timestamp - int(time_per_frame * 19)
+
             resized_frame = cv2.resize(frame, None, fx=SCALE, fy=SCALE)
 
             if force_recalibration:
@@ -431,7 +433,7 @@ def run_pipeline(video_path, display_output=False):
                         missed_frame_count.get(identity, 0) != 0
                         and face_memory[identity]["is_speaking"]
                     ):
-                        face_memory[identity]["start_time"] = frame_timestamp
+                        face_memory[identity]["start_time"] = practical_timestamp
                     missed_frame_count[identity] = 0
 
                     normalised_landmarks = get_normalised_mouth(result, DIMS)
@@ -440,8 +442,6 @@ def run_pipeline(video_path, display_output=False):
                     lip_landmarks = np.array(
                         [[landmarks[i].x, landmarks[i].y] for i in LIP_INDICES]
                     )
-                    # print(lip_landmarks)
-                    # print(lip_landmarks.mean(axis=0))
 
                     new_rect = _get_bounding_box(landmarks, expanded_box)
 
@@ -454,25 +454,30 @@ def run_pipeline(video_path, display_output=False):
 
                     # Predict speaking status using neural network
                     if len(np_landmarks_memory) == 38:
-                        is_speaking, confidence = _update_speech_status(
-                            model, np_landmarks_memory
-                        )
+                        confidence = _update_speech_status(model, np_landmarks_memory)
+                        confidence = confidence.item()
                     else:
-                        is_speaking, confidence = False, 0.0
-
-                    # if identity == "SPEAKER_02":
-                    #     print(f"{identity}: {is_speaking}, {confidence}")
-                    #     print(f"{lip_landmarks}")
-                    #     print(f"{identity} mean: {lip_landmarks.mean(axis=0)}")
+                        confidence = 0.0
 
                     was_speaking = face_memory[identity]["is_speaking"]
+
+                    # Add hysteresis to prevent flickering
+                    if was_speaking:
+                        is_speaking = confidence > 0.25
+                    else:
+                        is_speaking = confidence > 0.5
+
                     if is_speaking and not was_speaking:
                         # The person has just started speaking
-                        face_memory[identity]["start_time"] = frame_timestamp
+                        face_memory[identity]["start_time"] = practical_timestamp
                     elif not is_speaking and was_speaking:
                         # Person has just finished speaking
                         _add_segment(
-                            face_memory, segments, identity, frame_timestamp, confidence
+                            face_memory,
+                            segments,
+                            identity,
+                            practical_timestamp,
+                            confidence,
                         )
 
                     face_memory[identity]["is_speaking"] = is_speaking
@@ -493,9 +498,11 @@ def run_pipeline(video_path, display_output=False):
                 else:
                     # Face cannot be found by mediapipe
                     if identity in missed_frame_count:
-                        # print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
-                        face_memory[identity]["landmarks_memory"].append(np.zeros((80, DIMS)))
+                        landmarks_memory = face_memory[identity]["landmarks_memory"]
+                        landmarks_memory.append(np.zeros((80, DIMS)))
+                        if len(landmarks_memory) > 38:
+                            landmarks_memory.pop(0)
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value
                         if (
@@ -503,12 +510,12 @@ def run_pipeline(video_path, display_output=False):
                             and missed_frame_count[identity] == 1
                         ):
                             _add_segment(
-                                face_memory, segments, identity, frame_timestamp
+                                face_memory, segments, identity, practical_timestamp
                             )
-                            face_memory[identity]["start_time"] = frame_timestamp
+                            face_memory[identity]["start_time"] = practical_timestamp
 
-                        # Allow 1 second of missed tracking before heavy recalibration is forced
-                        if missed_frame_count[identity] >= fps:
+                        # Allow 0.5 seconds of missed tracking before heavy recalibration is forced
+                        if missed_frame_count[identity] >= fps / 2:
                             force_recalibration = True
 
             if display_output:
@@ -516,11 +523,16 @@ def run_pipeline(video_path, display_output=False):
             frame_count += 1
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
+            # key = cv2.waitKey(0)
+            # if key & 0xFF == ord("q"):
+            #     break
+            # elif key & 0xFF == ord("n"):
+            #     continue
 
     # Add entries for faces still speaking at end of video
     for identity, data in face_memory.items():
         if data["is_speaking"]:
-            _add_segment(face_memory, segments, identity, frame_timestamp)
+            _add_segment(face_memory, segments, identity, practical_timestamp)
 
     fvs.stop()
     cv2.destroyAllWindows()
@@ -533,13 +545,20 @@ if __name__ == "__main__":
     diarised_path = Path(f"data/lstm_{DIMS}d_diarisation")
     diarised_path.mkdir(parents=True, exist_ok=True)
 
+    model = SpeechDetectorNN(input_size=80 * DIMS)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.load_state_dict(
+        torch.load(
+            speech_model_path, map_location=torch.device(device), weights_only=True
+        )
+    )
+    model.eval()
+
     videos = Path("data/processed_videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        # video = Path(
-        #     "data/videos/4A8orzGYQRI_2.mp4"
-        # )  # Remove if doing full video baseline
+        # video = Path("data/processed_videos/4A8orzGYQRI_2.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
-        segments = run_pipeline(video, False)
+        segments = run_pipeline(video, model, False)
         save_to_rttm(segments, video.stem, output_path)
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)
