@@ -7,6 +7,8 @@ from torch.utils.data import TensorDataset, DataLoader
 from sklearn.model_selection import train_test_split
 from pathlib import Path
 
+DIMS = 3
+
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=50):
@@ -83,11 +85,9 @@ class SpeechDetectorTransformer(nn.Module):
         return logits
 
 
-data_path = Path("data/lip_landmarks_2d_cleaned.h5")
-model_save_path = Path("models/speech_detector_transformer_2d_weights.pth")
+data_path = Path(f"data/lip_landmarks_{DIMS}d_cleaned.h5")
+model_save_path = Path(f"models/speech_detector_transformer_{DIMS}d_weights.pth")
 model_save_path.parent.mkdir(parents=True, exist_ok=True)
-
-DIMS = 2
 
 
 def run_training(X_train, y_train, X_val, y_val):
