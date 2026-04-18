@@ -18,6 +18,23 @@ def save_to_rttm(data, video_id, output_path):
             f.write(line)
 
 
+# Reads rttm file from path
+def read_rttm(file_path):
+    segments = []
+    with open(file_path, "r") as f:
+        for line in f.readlines():
+            cols = line.split(" ")
+
+            start = float(cols[3])
+            duration = float(cols[4])
+            speaker_id = cols[7]
+
+            segments.append(
+                {"start": start, "end": start + duration, "speaker": speaker_id}
+            )
+
+    return segments
+
 
 # Compares two folders with corresponding rttm files and writes results to csv
 def evaluate_diarisation(ground_truth_path, comparison_path, output_file_path):

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import itertools
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -7,8 +8,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 MIN_COOCCURRENCE_INTERVAL: float = 0.1
-VIDEO_WEIGHT: float = 0.6
-VIDEO_CONFIDENCE_THRESHOLD: float = 0.5
+VIDEO_CONFIDENCE_THRESHOLD: float = 0.4
 
 # Prefix used for canonical (output) speaker IDs.
 CANONICAL_PREFIX: str = "SPEAKER_"
@@ -63,7 +63,7 @@ def _build_atomic_timeline(
     sorted_boundaries = sorted(boundaries)
 
     # Build lookup: for each channel, map each ms point to the active segment
-    def _build_lookup(segments: list[dict]) -> list[tuple[int, int, dict]]:
+    def _build_lookup(segments: list[dict]):
         """Returns list of (start_ms, end_ms, segment) sorted by start."""
         result = []
         for seg in segments:
@@ -75,14 +75,9 @@ def _build_atomic_timeline(
     audio_lookup = _build_lookup(audio_segments)
     video_lookup = _build_lookup(video_segments)
 
-    def _active_segment(
-        lookup: list[tuple[int, int, dict]], t_ms: int
-    ) -> Optional[dict]:
+    def _active_segments(lookup, t_ms: int) -> list[dict]:
         """Return the segment active at the midpoint of the interval starting at t_ms."""
-        for s, e, seg in lookup:
-            if s <= t_ms < e:
-                return seg
-        return None
+        return [seg for s, e, seg in lookup if s <= t_ms < e]
 
     intervals: list[AtomicInterval] = []
     for i in range(len(sorted_boundaries) - 1):
@@ -94,24 +89,30 @@ def _build_atomic_timeline(
 
         mid_ms = (start_ms + end_ms) // 2
 
-        audio_seg = _active_segment(audio_lookup, mid_ms)
-        video_seg = _active_segment(video_lookup, mid_ms)
+        active_audio = _active_segments(audio_lookup, mid_ms)
+        active_video = _active_segments(video_lookup, mid_ms)
 
         # Skip completely silent / uncovered intervals
-        if audio_seg is None and video_seg is None:
+        if not active_audio and not active_video:
             continue
 
-        intervals.append(
-            AtomicInterval(
-                start_ms=start_ms,
-                end_ms=end_ms,
-                audio_speaker=audio_seg["speaker"] if audio_seg else None,
-                video_speaker=video_seg["speaker"] if video_seg else None,
-                video_confidence=float(video_seg.get("confidence", 0.0))
-                if video_seg
-                else 0.0,
+        audios_to_process = active_audio if active_audio else [None]
+        videos_to_process = active_video if active_video else [None]
+
+        for audio_seg, video_seg in itertools.product(
+            audios_to_process, videos_to_process
+        ):
+            intervals.append(
+                AtomicInterval(
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    audio_speaker=audio_seg["speaker"] if audio_seg else None,
+                    video_speaker=video_seg["speaker"] if video_seg else None,
+                    video_confidence=float(video_seg.get("confidence", 0.0))
+                    if video_seg
+                    else 0.0,
+                )
             )
-        )
 
     return intervals
 
@@ -151,8 +152,7 @@ def _solve_identity_mapping(
             c = v_idx[iv.video_speaker]
             matrix[r, c] += iv.duration_s
 
-    # Hungarian algorithm maximises overlap (negate for minimisation API)
-    row_ind, col_ind = linear_sum_assignment(-matrix)
+    row_ind, col_ind = linear_sum_assignment(matrix, maximize=True)
 
     # Assign canonical IDs to matched pairs
     audio_to_canonical: dict[str, str] = {}
@@ -248,7 +248,7 @@ def _collapse_intervals(intervals: list[AtomicInterval]) -> list[dict]:
             output.append(
                 {
                     "start": round(current_start_ms / 1000, 3),
-                    "duration": round((current_end_ms - current_start_ms) / 1000, 3),
+                    "end": round(current_end_ms / 1000, 3),
                     "speaker": current_speaker,
                 }
             )
@@ -260,7 +260,7 @@ def _collapse_intervals(intervals: list[AtomicInterval]) -> list[dict]:
     output.append(
         {
             "start": round(current_start_ms / 1000, 3),
-            "duration": round((current_end_ms - current_start_ms) / 1000, 3),
+            "end": round(current_end_ms / 1000, 3),
             "speaker": current_speaker,
         }
     )

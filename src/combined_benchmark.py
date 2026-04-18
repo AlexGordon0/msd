@@ -9,7 +9,7 @@ from src.audio import diarise_from_array
 from src.cam import run_pipeline
 from src.extract_audios import extract_audio
 from src.fusion_engine import merge_diarisation
-from src.rttm_utils import save_to_rttm, evaluate_diarisation
+from src.rttm_utils import save_to_rttm, read_rttm, evaluate_diarisation
 
 if __name__ == "__main__":
     load_dotenv(find_dotenv())
@@ -23,15 +23,33 @@ if __name__ == "__main__":
     print(device)
     pipeline.to(device)
 
-    videos_path = Path("data/videos")
+    videos_path = Path("data/processed_videos")
     output_folder = Path("data/combined_diarisation")
     output_folder.mkdir(parents=True, exist_ok=True)
     ground_truth_folder = Path("data/ground_truths")
 
     for filename in videos_path.glob("*.mp4"):
-        audio, sample_rate = extract_audio(filename)
-        audio_segments = diarise_from_array(audio, sample_rate, pipeline)
-        video_segments = run_pipeline(filename)
+        audio_path = Path("data/baselines")
+        visual_path = Path("data/lstm_2d_diarisation")
+
+        audio_file = audio_path / filename.with_suffix(".rttm").name
+        visual_file = visual_path / filename.with_suffix(".rttm").name
+
+        if audio_file.exists():
+            audio_segments = read_rttm(audio_file)
+        else:
+            print("NOT FOUND file")
+            exit(0)
+            audio, sample_rate = extract_audio(filename)
+            audio_segments = diarise_from_array(audio, sample_rate, pipeline)
+
+        if visual_file.exists():
+            video_segments = read_rttm(visual_file)
+        else:
+            print("NOT FOUND file")
+            exit(0)
+            video_segments = run_pipeline(filename)
+
         # print("-" * 80)
         # print(audio_segments)
         # print("-" * 80)
