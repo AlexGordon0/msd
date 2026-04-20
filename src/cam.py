@@ -9,6 +9,7 @@ import numpy as np
 from deepface import DeepFace
 
 from src.rttm_utils import evaluate_diarisation, save_to_rttm
+from src.preprocessing import get_normalised_mouth
 
 
 class FileVideoStream:
@@ -137,6 +138,8 @@ LIP_INDICES = [
     415,
 ]
 
+DIMS = 2
+
 mp_landmarker_path = "models/face_landmarker.task"
 
 BaseOptions = mp.tasks.BaseOptions
@@ -150,6 +153,7 @@ landmarker_options = FaceLandmarkerOptions(
         model_asset_path=mp_landmarker_path,
     ),
     running_mode=VisionRunningMode.IMAGE,
+    output_facial_transformation_matrixes=True,
     num_faces=1,
 )
 
@@ -256,7 +260,7 @@ def _update_speech_status(
     return is_speaking
 
 
-def _draw_face_info(frame, landmarks, bbox, is_speaking, SCALE):
+def _draw_face_info(frame, landmarks, mean, bbox, is_speaking, confidence, SCALE):
     """
     Draw list of landmarks and bounding box onto the given frame
     If is_speaking is True, then bounding box is green, otherwise red
@@ -269,15 +273,14 @@ def _draw_face_info(frame, landmarks, bbox, is_speaking, SCALE):
     abs_x2 = int((x + w) / SCALE)
     abs_y2 = int((y + h) / SCALE)
 
-    for index in LIP_INDICES:
-        landmark = landmarks[index]
+    landmark_colour = (255, 0, 0)
+    for i in LIP_INDICES:
+        landmark = landmarks[i]
 
         frame_x = int(abs_x1 + landmark.x * w / SCALE)
         frame_y = int(abs_y1 + landmark.y * h / SCALE)
 
-        landmark_colour = (255, 0, 0)
-
-        frame = cv2.circle(
+        cv2.circle(
             frame,
             (
                 frame_x,
@@ -288,54 +291,77 @@ def _draw_face_info(frame, landmarks, bbox, is_speaking, SCALE):
             -1,
         )
 
-        border_colour = (0, 255, 0) if is_speaking else (0, 0, 255)
-        frame = cv2.rectangle(
-            frame,
-            (abs_x1, abs_y1),
-            (abs_x2, abs_y2),
-            border_colour,
-            3,
-        )
+    mean_x = int(abs_x1 + mean[0] * w / SCALE)
+    mean_y = int(abs_y1 + mean[1] * h / SCALE)
+
+    cv2.circle(
+        frame,
+        (
+            mean_x,
+            mean_y,
+        ),
+        5,
+        (0, 0, 255),
+        -1,
+    )
+
+    border_colour = (0, 255, 0) if is_speaking else (0, 0, 255)
+    cv2.rectangle(
+        frame,
+        (abs_x1, abs_y1),
+        (abs_x2, abs_y2),
+        border_colour,
+        3,
+    )
+
+    text_position = (abs_x1, max(abs_y1 - 10, 20))
+
+    cv2.putText(
+        frame,
+        f"{confidence:.2f}",
+        text_position,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,  # Font scale
+        border_colour,  # Match text color to the box color
+        2,  # Thickness
+        cv2.LINE_AA,  # Anti-aliased line
+    )
 
 
-def run_pipeline(video_path, display_output=False):
-    face_memory = {}  # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0}, ..., }
+def run_pipeline(video_path, model, display_output=False):
+    # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, DIMS) array}, ..., }
+    face_memory = {}
     mouth_ratio_history = {}  # Stores mouth ratio history for each speaker
+    face_id_counter = 0
     missed_frame_count = {}
     segments = []
-    face_id_counter = 0
 
     SCALE = 0.25
 
     fvs = FileVideoStream(video_path).start()
-    fps = int(fvs.fps)
+    fps = fvs.fps
     time_per_frame = 1000 / fps
 
     with FaceLandmarker.create_from_options(landmarker_options) as landmarker:
         frame_count = 0
-        start_time = int(time.time() * 1000)
 
         force_recalibration = True
         while fvs.more():
             frame = fvs.read()
 
-            frame_start_time = int(time.time() * 1000)
-            frame_timestamp = time_per_frame * frame_count
+            frame_timestamp = int(time_per_frame * frame_count)
+
+            # Create timestamp that is half of time that model analyses in total to account for
+            # time it takes model to realise change in activity.
+            practical_timestamp = frame_timestamp
+
             resized_frame = cv2.resize(frame, None, fx=SCALE, fy=SCALE)
 
             if force_recalibration:
                 force_recalibration = False
 
-                for identity, data in missed_frame_count.items():
-                    if data != 0:
-                        # Face has been hidden from frame
-                        # Add segment with 0 confidence
-                        _add_segment(
-                            face_memory, segments, identity, frame_timestamp, 0
-                        )
                 missed_frame_count = {}
 
-                # Heavy detection logic runs on key frames
                 faces = DeepFace.extract_faces(
                     img_path=resized_frame,
                     detector_backend="retinaface",
@@ -422,24 +448,27 @@ def run_pipeline(video_path, display_output=False):
                 result = landmarker.detect(mp_image)
 
                 expanded_box = [x1, y1, x2 - x1, y2 - y1]
+
                 if result.face_landmarks:
                     if (
                         missed_frame_count.get(identity, 0) != 0
                         and face_memory[identity]["is_speaking"]
                     ):
-                        # Face has been hidden from frame
-                        # Add segment with 0 confidence
-                        _add_segment(
-                            face_memory, segments, identity, frame_timestamp, 0
-                        )
-                        face_memory[identity]["start_time"] = frame_timestamp
+                        face_memory[identity]["start_time"] = practical_timestamp
                     missed_frame_count[identity] = 0
+
+                    normalised_landmarks = get_normalised_mouth(result, DIMS)
                     landmarks = result.face_landmarks[0]
+
+                    lip_landmarks = np.array(
+                        [[landmarks[i].x, landmarks[i].y] for i in LIP_INDICES]
+                    )
+
                     new_rect = _get_bounding_box(landmarks, expanded_box)
 
                     # Calculate MAR and Update segments
                     is_speaking = _update_speech_status(
-                        landmarks,
+                        normalised_landmarks,
                         identity,
                         mouth_ratio_history,
                         face_memory,
@@ -448,9 +477,17 @@ def run_pipeline(video_path, display_output=False):
                         fps,
                     )
 
+                    face_memory[identity]["is_speaking"] = is_speaking
+
                     if display_output:
                         _draw_face_info(
-                            frame, landmarks, expanded_box, is_speaking, SCALE
+                            frame,
+                            landmarks,
+                            lip_landmarks.mean(axis=0),
+                            expanded_box,
+                            is_speaking,
+                            1,
+                            SCALE,
                         )
 
                     # Update the bounding box for the next frame
@@ -458,7 +495,6 @@ def run_pipeline(video_path, display_output=False):
                 else:
                     # Face cannot be found by mediapipe
                     if identity in missed_frame_count:
-                        # print(f"{frame_timestamp}: Missed frame for {identity}")
                         missed_frame_count[identity] += 1
 
                         # If they are speaking and a frame is missed then start new segment with new confidence value
@@ -467,50 +503,46 @@ def run_pipeline(video_path, display_output=False):
                             and missed_frame_count[identity] == 1
                         ):
                             _add_segment(
-                                face_memory, segments, identity, frame_timestamp
+                                face_memory, segments, identity, practical_timestamp
                             )
-                            face_memory[identity]["start_time"] = frame_timestamp
+                            face_memory[identity]["start_time"] = practical_timestamp
 
-                        # Allow 1 second of missed tracking before heavy recalibration is forced
-                        if missed_frame_count[identity] >= fps:
+                        # Allow 0.5 seconds of missed tracking before heavy recalibration is forced
+                        if missed_frame_count[identity] >= fps / 2:
                             force_recalibration = True
 
             if display_output:
                 cv2.imshow("Lip reading", frame)
             frame_count += 1
-            key = cv2.waitKey(0)
-            if key & 0xFF == ord("q"):
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
-            elif key & 0xFF == ord("n"):
-                continue
+            # key = cv2.waitKey(0)
+            # if key & 0xFF == ord("q"):
+            #     break
+            # elif key & 0xFF == ord("n"):
+            #     continue
 
     # Add entries for faces still speaking at end of video
     for identity, data in face_memory.items():
         if data["is_speaking"]:
-            _add_segment(face_memory, segments, identity, frame_timestamp)
+            _add_segment(face_memory, segments, identity, practical_timestamp)
 
     fvs.stop()
     cv2.destroyAllWindows()
-    segments = [
-        s for s in segments if s["confidence"] > 0
-    ]  # Remove 0 confidence segments
     return sorted(segments, key=lambda x: x["start"])
 
 
 if __name__ == "__main__":
-    videos_path = Path("data/videos")
     ground_truth_path = Path("data/ground_truths")
-    output_csv_path = Path("data/video_only_results.csv")
-    diarised_path = Path("data/diarised_video")
+    output_csv_path = Path(f"data/naive_{DIMS}d_results.csv")
+    diarised_path = Path(f"data/naive_{DIMS}d_diarisation")
     diarised_path.mkdir(parents=True, exist_ok=True)
 
-    videos = Path("data/videos").glob("*.mp4")
+    videos = Path("data/processed_videos").glob("*.mp4")
     for i, video in enumerate(videos):
-        video = Path("data/videos/uygFuBUIkPI_0.mp4")
+        # video = Path("data/processed_videos/4A8orzGYQRI_2.mp4")
         output_path = diarised_path / (video.with_suffix(".rttm").name)
         print(f"{i + 1}: Running pipeline for {video.stem}")
-        segments = run_pipeline(video, True)
-        print(segments)
+        segments = run_pipeline(video, False)
         save_to_rttm(segments, video.stem, output_path)
-        break
     evaluate_diarisation(ground_truth_path, diarised_path, output_csv_path)
