@@ -227,16 +227,13 @@ def _update_speech_status(
     """
     Update the speaking status of the speaker based off of mouth ratio variance
     """
-    p_top, p_bottom = landmarks[13], landmarks[14]
-    p_left, p_right = landmarks[61], landmarks[291]
-    left_eye, right_eye = landmarks[473], landmarks[468]
+    p_top, p_bottom = landmarks[3], landmarks[4]
+    p_left, p_right = landmarks[14], landmarks[50]
 
-    v_dist = np.linalg.norm((p_top.x - p_bottom.x, p_top.y - p_bottom.y))
-    h_dist = np.linalg.norm((p_left.x - p_right.x, p_left.y - p_right.y))
-    eye_dist = np.linalg.norm((left_eye.x - right_eye.x, left_eye.y - right_eye.y))
+    v_dist = np.linalg.norm((p_top[0] - p_bottom[0], p_top[1] - p_bottom[1]))
+    h_dist = np.linalg.norm((p_left[0] - p_right[0], p_left[1] - p_right[1]))
     # Normalise horizontal distance to account for acute angle of face
-    normalised_h_dist = h_dist / eye_dist
-    mar = v_dist / normalised_h_dist
+    mar = v_dist / h_dist
 
     history = history_dict.setdefault(identity, [])
     history.append(mar)
@@ -328,7 +325,7 @@ def _draw_face_info(frame, landmarks, mean, bbox, is_speaking, confidence, SCALE
     )
 
 
-def run_pipeline(video_path, model, display_output=False):
+def run_pipeline(video_path, display_output=False):
     # {id: {"bbox": [], "embedding": [], "is_speaking": False, "start_time": 0.0, "landmarks_memory": (38, 80, DIMS) array}, ..., }
     face_memory = {}
     mouth_ratio_history = {}  # Stores mouth ratio history for each speaker
