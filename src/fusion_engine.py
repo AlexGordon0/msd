@@ -1,5 +1,4 @@
 from __future__ import annotations
-import itertools
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -43,10 +42,7 @@ def _to_ms(t: float) -> int:
     return round(t * 1000)
 
 
-def _build_atomic_timeline(
-    audio_segments: list[dict],
-    video_segments: list[dict],
-) -> list[AtomicInterval]:
+def _build_atomic_timeline(audio_segments, video_segments):
     """
     Sweep across the merged set of boundary points from both channels to
     produce a list of non-overlapping atomic intervals, each annotated with
@@ -63,7 +59,7 @@ def _build_atomic_timeline(
     sorted_boundaries = sorted(boundaries)
 
     # Build lookup: for each channel, map each ms point to the active segment
-    def _build_lookup(segments: list[dict]):
+    def _build_lookup(segments):
         """Returns list of (start_ms, end_ms, segment) sorted by start."""
         result = []
         for seg in segments:
@@ -75,11 +71,14 @@ def _build_atomic_timeline(
     audio_lookup = _build_lookup(audio_segments)
     video_lookup = _build_lookup(video_segments)
 
-    def _active_segments(lookup, t_ms: int) -> list[dict]:
+    def _active_segment(lookup, t_ms):
         """Return the segment active at the midpoint of the interval starting at t_ms."""
-        return [seg for s, e, seg in lookup if s <= t_ms < e]
+        for s, e, seg in lookup:
+            if s <= t_ms < e:
+                return seg
+        return None
 
-    intervals: list[AtomicInterval] = []
+    intervals= []
     for i in range(len(sorted_boundaries) - 1):
         start_ms = sorted_boundaries[i]
         end_ms = sorted_boundaries[i + 1]
@@ -89,37 +88,29 @@ def _build_atomic_timeline(
 
         mid_ms = (start_ms + end_ms) // 2
 
-        active_audio = _active_segments(audio_lookup, mid_ms)
-        active_video = _active_segments(video_lookup, mid_ms)
+        audio_seg = _active_segment(audio_lookup, mid_ms)
+        video_seg = _active_segment(video_lookup, mid_ms)
 
         # Skip completely silent / uncovered intervals
-        if not active_audio and not active_video:
+        if audio_seg is None and video_seg is None:
             continue
 
-        audios_to_process = active_audio if active_audio else [None]
-        videos_to_process = active_video if active_video else [None]
-
-        for audio_seg, video_seg in itertools.product(
-            audios_to_process, videos_to_process
-        ):
-            intervals.append(
-                AtomicInterval(
-                    start_ms=start_ms,
-                    end_ms=end_ms,
-                    audio_speaker=audio_seg["speaker"] if audio_seg else None,
-                    video_speaker=video_seg["speaker"] if video_seg else None,
-                    video_confidence=float(video_seg.get("confidence", 0.0))
-                    if video_seg
-                    else 0.0,
-                )
+        intervals.append(
+            AtomicInterval(
+                start_ms=start_ms,
+                end_ms=end_ms,
+                audio_speaker=audio_seg["speaker"] if audio_seg else None,
+                video_speaker=video_seg["speaker"] if video_seg else None,
+                video_confidence=float(video_seg.get("confidence", 0.0))
+                if video_seg
+                else 0.0,
             )
+        )
 
     return intervals
 
 
-def _solve_identity_mapping(
-    intervals: list[AtomicInterval],
-) -> tuple[dict[str, str], dict[str, str]]:
+def _solve_identity_mapping(intervals):
     """
     Build a co-occurrence overlap matrix between audio and video speaker IDs,
     then solve the assignment problem to find the best 1-to-1 mapping.
@@ -192,19 +183,9 @@ def _solve_identity_mapping(
     return audio_to_canonical, video_to_canonical
 
 
-def _resolve_intervals(
-    intervals: list[AtomicInterval],
-    audio_to_canonical: dict[str, str],
-    video_to_canonical: dict[str, str],
-) -> None:
+def _resolve_intervals(intervals, audio_to_canonical, video_to_canonical):
     """
     Mutates each interval in-place, setting resolved_speaker.
-
-    Both channels present:
-        Use video if confidence >= VIDEO_CONFIDENCE_THRESHOLD,
-        otherwise use audio.
-    Only one channel present:
-        Use that channel directly.
     """
     for iv in intervals:
         has_audio = iv.audio_speaker is not None
@@ -227,7 +208,7 @@ def _resolve_intervals(
             iv.resolved_speaker = "UNKNOWN"
 
 
-def _collapse_intervals(intervals: list[AtomicInterval]) -> list[dict]:
+def _collapse_intervals(intervals):
     """
     Merge consecutive atomic intervals that share the same resolved speaker
     into a single output segment.
@@ -235,7 +216,7 @@ def _collapse_intervals(intervals: list[AtomicInterval]) -> list[dict]:
     if not intervals:
         return []
 
-    output: list[dict] = []
+    output = []
     current_start_ms = intervals[0].start_ms
     current_end_ms = intervals[0].end_ms
     current_speaker = intervals[0].resolved_speaker
@@ -268,22 +249,15 @@ def _collapse_intervals(intervals: list[AtomicInterval]) -> list[dict]:
     return output
 
 
-def merge_diarisation(
-    audio_segments: list[dict],
-    video_segments: list[dict],
-) -> list[dict]:
+def merge_diarisation(audio_segments, video_segments):
     """Merge audio and video diarisation streams into a single output."""
-    # 1. Atomic timeline
     intervals = _build_atomic_timeline(audio_segments, video_segments)
 
     if not intervals:
         return []
 
-    # 2. Speaker identity mapping
     audio_to_canonical, video_to_canonical = _solve_identity_mapping(intervals)
 
-    # 3. Resolve each interval
     _resolve_intervals(intervals, audio_to_canonical, video_to_canonical)
 
-    # 4. Collapse and return
     return _collapse_intervals(intervals)

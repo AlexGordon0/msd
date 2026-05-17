@@ -4,6 +4,8 @@ import sys
 import torch
 from dotenv import find_dotenv, load_dotenv
 from pyannote.audio import Pipeline
+from pyannote.metrics.diarization import DiarizationErrorRate
+from pyannote.database.util import load_rttm
 from pathlib import Path
 
 from src.audio import diarise_from_array
@@ -35,6 +37,7 @@ if __name__ == "__main__":
     audio, sample_rate = extract_audio(filename)
     audio_segments = diarise_from_array(audio, sample_rate, pipeline)
     video_segments = run_pipeline(filename)
+
     print("-" * 80)
     print(audio_segments)
     print("-" * 80)
@@ -46,3 +49,23 @@ if __name__ == "__main__":
     filename_path = Path(filename)
     output_path = filename_path.with_suffix(".rttm").name
     save_to_rttm(merged_output, Path(filename).stem, output_path)
+
+    metric = DiarizationErrorRate(collar=0.250)
+    ref_dict = load_rttm(
+        Path("data/ground_truths") / filename_path.with_suffix(".rttm").name
+    )
+    hyp_dict = load_rttm(output_path)
+
+    if len(ref_dict) == 0 or len(hyp_dict) == 0:
+        exit(0)
+
+    ref = ref_dict[Path(output_path).stem]
+    hyp = hyp_dict[Path(output_path).stem]
+
+    uem = ref.get_timeline().support()
+    current_der = metric(ref, hyp, uem=uem, detailed=True)
+    report = metric[:]
+    total_time = report["total"]
+    print(f"Confusion:    {(report['confusion'] / total_time) * 100:.2f}%")
+    print(f"Missed:       {(report['missed detection'] / total_time) * 100:.2f}%")
+    print(f"False Alarm:  {(report['false alarm'] / total_time) * 100:.2f}%")

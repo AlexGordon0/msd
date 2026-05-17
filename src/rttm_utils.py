@@ -28,10 +28,25 @@ def read_rttm(file_path):
             start = float(cols[3])
             duration = float(cols[4])
             speaker_id = cols[7]
-
-            segments.append(
-                {"start": start, "end": start + duration, "speaker": speaker_id}
-            )
+            confidence = cols[8]
+            if confidence != "<NA>":
+                confidence = float(confidence)
+                segments.append(
+                    {
+                        "start": start,
+                        "end": start + duration,
+                        "speaker": speaker_id,
+                        "confidence": confidence,
+                    }
+                )
+            else:
+                segments.append(
+                    {
+                        "start": start,
+                        "end": start + duration,
+                        "speaker": speaker_id,
+                    }
+                )
 
     return segments
 

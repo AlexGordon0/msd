@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     for filename in videos_path.glob("*.mp4"):
         audio_path = Path("data/baselines")
-        visual_path = Path("data/lstm_2d_diarisation")
+        visual_path = Path("data/lstm_2d_diarisation_conf")
 
         audio_file = audio_path / filename.with_suffix(".rttm").name
         visual_file = visual_path / filename.with_suffix(".rttm").name
