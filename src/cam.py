@@ -206,7 +206,7 @@ def _get_bounding_box(landmarks, bbox):
     return [x1, y1, x2 - x1, y2 - y1]
 
 
-def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=1):
+def _add_segment(face_memory, segments, identity, frame_timestamp, confidence=0.5):
     """
     Add new segment to given segments array
     """

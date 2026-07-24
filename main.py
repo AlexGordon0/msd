@@ -13,6 +13,7 @@ from src.cam import run_pipeline
 from src.extract_audios import extract_audio
 from src.fusion_engine import merge_diarisation
 from src.rttm_utils import save_to_rttm
+from src.train_nn import SpeechDetectorNN
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
@@ -34,9 +35,19 @@ if __name__ == "__main__":
     print(device)
     pipeline.to(device)
 
+    model = SpeechDetectorNN()
+    speech_model_path = "models/speech_detector_lstm_2d.pth"
+    model.load_state_dict(
+        torch.load(
+            speech_model_path, map_location=torch.device(device), weights_only=True
+        )
+    )
+    model.eval()
+
+
     audio, sample_rate = extract_audio(filename)
     audio_segments = diarise_from_array(audio, sample_rate, pipeline)
-    video_segments = run_pipeline(filename)
+    video_segments = run_pipeline(filename, model, True)
 
     print("-" * 80)
     print(audio_segments)
@@ -65,7 +76,12 @@ if __name__ == "__main__":
     uem = ref.get_timeline().support()
     current_der = metric(ref, hyp, uem=uem, detailed=True)
     report = metric[:]
+    print(report.keys())
     total_time = report["total"]
-    print(f"Confusion:    {(report['confusion'] / total_time) * 100:.2f}%")
-    print(f"Missed:       {(report['missed detection'] / total_time) * 100:.2f}%")
-    print(f"False Alarm:  {(report['false alarm'] / total_time) * 100:.2f}%")
+    missed = report["missed detection"]
+    false_alarm = report["false alarm"]
+    confusion = report["confusion"]
+    print(f"Missed:       {(missed / total_time) * 100:.2f}%")
+    print(f"False Alarm:  {(false_alarm / total_time) * 100:.2f}%")
+    print(f"Confusion:    {(confusion / total_time) * 100:.2f}%")
+    print(f"DER:          {((missed + false_alarm + confusion) / total_time) * 100:.2f}%")
